@@ -26,3 +26,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\fd.ps1 test|save|ins
 ```
 
 `tools/fd-test` is a test-harness mod and `tools/fd-debug` is a save inspector. See `CLAUDE.md` for design notes.
+
+## License
+
+MIT. See `LICENSE`.
