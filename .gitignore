@@ -1,0 +1,9 @@
+# Windows / editors
+Thumbs.db
+desktop.ini
+.vscode/
+*.swp
+
+# Packaged builds and Factorio output
+*.zip
+*.log

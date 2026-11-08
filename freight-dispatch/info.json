@@ -1,0 +1,9 @@
+{
+  "name": "freight-dispatch",
+  "version": "0.2.1",
+  "title": "Freight Dispatch",
+  "author": "steve",
+  "factorio_version": "2.1",
+  "dependencies": ["base >= 2.1.0"],
+  "description": "Replaces the factory game with a railway tycoon game. Towns and industries are scattered across a fresh map. Buy track, signals and trains with money, then earn by hauling passengers, mail and freight. Pay depends on distance and delivery speed. Industries grow when served well, so busy lines need good signalling to keep running. Enable this mod for new games only."
+}

@@ -1,0 +1,8 @@
+{
+  "name": "fd-test",
+  "version": "0.0.1",
+  "title": "Freight Dispatch test harness",
+  "author": "test",
+  "factorio_version": "2.1",
+  "dependencies": ["freight-dispatch"]
+}
