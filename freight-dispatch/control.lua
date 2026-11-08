@@ -66,6 +66,11 @@ local function flying_text(position, text, color, player)
   end
 end
 
+-- Town growth multiplier: 1 up to C.GROWTH_REF population, then sqrt(REF / pop).
+function M.growth_damp(site)
+  return math.min(1, math.sqrt(C.GROWTH_REF / math.max(1, site.pop)))
+end
+
 local function earn(amount)
   storage.money = storage.money + amount
   if amount > 0 then
@@ -403,8 +408,10 @@ function M.site_detail(site)
     if total < 0.5 then
       return "Not growing. Pick up here regularly, and deliver goods, mail or passengers."
     end
+    local damp = M.growth_damp(site)
+    local slow = damp < 0.99 and (", big-town slowdown x" .. string.format("%.2f", damp)) or ""
     return "Growing +" .. fmt(total) .. "/min (" .. string.format("%.1f", total / math.max(1, site.pop) * 100) ..
-      "%): " .. table.concat(parts, ", ")
+      "%): " .. table.concat(parts, ", ") .. slow
   elseif kind.main then
     local main_l, boost_l = C.CARGO[kind.main].label, C.CARGO[kind.booster].label
     local main_i, boost_i = "[item=" .. kind.main .. "]", "[item=" .. kind.booster .. "]"
@@ -695,7 +702,7 @@ local function on_delivered(site, item, amount)
   site.recv = site.recv or {}
   site.recv[item] = (site.recv[item] or 0) + amount
   if site.kind == "town" then
-    local g = C.TOWN_GROWTH[item] or 0
+    local g = (C.TOWN_GROWTH[item] or 0) * M.growth_damp(site)
     site.pop = site.pop + amount * g
     site.grow_acc = site.grow_acc or {}
     site.grow_acc[item] = (site.grow_acc[item] or 0) + amount * g
@@ -922,7 +929,7 @@ local function simulate_minute()
       -- last minute's growth, by source, for the status line
       local g = site.grow_acc or {}
       if site.rating > 0.3 then
-        g.service = site.pop * 0.004
+        g.service = site.pop * 0.004 * M.growth_damp(site)
         site.pop = site.pop + g.service
       end
       site.growth = g

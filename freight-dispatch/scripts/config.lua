@@ -97,6 +97,11 @@ C.TOWN_GROWTH = {
   ["fd-mail"] = 0.01,
   ["fd-goods"] = 0.08,
 }
+-- Big-town slowdown: above this population, every source of town growth is scaled by
+-- sqrt(GROWTH_REF / pop), so towns keep growing steadily instead of compounding without
+-- limit (pop 4,000: x0.5, pop 16,000: x0.25). Before 0.2.2 a served town doubled about
+-- every 70 minutes.
+C.GROWTH_REF = 1000
 
 C.KINDS = {
   ["town"] = {

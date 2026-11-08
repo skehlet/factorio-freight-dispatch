@@ -18,7 +18,7 @@ You run a railway company. You don't build a factory here. Towns and industries 
 
 [font=default-bold]3. Get paid.[/font] Pay = amount x straight-line distance x cargo rate x speed bonus. Slow deliveries pay less, and passengers and mail lose value fastest. Cargo must travel at least 60 tiles.
 
-[font=default-bold]4. Grow.[/font] Industries level up as you ship from them, which raises production. Towns grow when you deliver goods, mail and passengers, and bigger towns make more passengers. More output means more trains, and more trains means you need good signalling. Watch for deadlock and train-wreck alerts. Each site's second status line (on the map and in the Sites list) shows what drives it: a town's growth per minute by source, or an industry's output multiplier and stockpile.
+[font=default-bold]4. Grow.[/font] Industries level up as you ship from them, which raises production. Towns grow when you deliver goods, mail and passengers, and bigger towns make more passengers. Growth slows down once a town passes about 1,000 people, so big cities take a while. More output means more trains, and more trains means you need good signalling. Watch for deadlock and train-wreck alerts. Each site's second status line (on the map and in the Sites list) shows what drives it: a town's growth per minute by source, or an industry's output multiplier and stockpile.
 
 [font=default-bold]5. Upgrade.[/font] The Shop sells upgrades that apply to every train at once: better fuel (faster acceleration and top speed), bigger cargo wagons, and station crews that load faster. Running shoes make you run faster.
 

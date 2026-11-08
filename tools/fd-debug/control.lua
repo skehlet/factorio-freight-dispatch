@@ -30,17 +30,31 @@ script.on_nth_tick(60, function()
   local n = 0
   for _ in pairs(remote.call("freight_dispatch", "sites")) do n = n + 1 end
   log("FDSNAP sites=" .. n .. " " .. serpent.line(remote.call("freight_dispatch", "served")))
-  local surf = game.surfaces["freight"]
+  local st = remote.call("freight_dispatch", "stats")
+  log("FDBAL playtime_h=" .. string.format("%.2f", game.tick / 216000) .. " money=" .. math.floor(st.money) ..
+    " lifetime=" .. math.floor(st.lifetime) .. " " .. serpent.line(st))
+  local towns, inds = {}, {}
   for _, s in pairs(remote.call("freight_dispatch", "sites")) do
     if s.delivered > 0 or s.shipped > 0 then
-      log("FDSNAP served-ish " .. s.kind .. " " .. s.name .. " detail=" .. tostring(remote.call("freight_dispatch", "site_detail", s.id)))
-    end
-    if s.kind == "town" and s.delivered > 0 then
-      local n = surf.count_entities_filtered({ area = { { s.x - 30, s.y - 30 }, { s.x + 30, s.y + 30 } }, name = { "fd-house", "fd-shop" } })
-      log("FDSNAP town " .. s.name .. " pop=" .. math.floor(s.pop) .. " buildings=" .. s.building_count ..
-        " entities=" .. n .. " radius=" .. tostring(s.radius))
+      table.insert(s.kind == "town" and towns or inds, s)
     end
   end
+  table.sort(towns, function(a, b) return a.pop > b.pop end)
+  local total = 0
+  for _, s in pairs(towns) do
+    total = total + s.pop
+    log("FDBAL town " .. s.name .. " pop=" .. math.floor(s.pop) .. " rating=" .. string.format("%.2f", s.rating) ..
+      " shipped=" .. math.floor(s.shipped) .. " delivered=" .. math.floor(s.delivered) ..
+      " recv=" .. serpent.line(s.recv) .. " growth=" .. serpent.line(s.growth))
+  end
+  log("FDBAL towns=" .. #towns .. " total_pop=" .. math.floor(total))
+  for _, s in pairs(inds) do
+    log("FDBAL ind " .. s.kind .. " " .. s.name .. " lvl=" .. s.level .. " shipped=" .. math.floor(s.shipped) ..
+      " detail=" .. tostring(remote.call("freight_dispatch", "site_detail", s.id)))
+  end
+  local n = 0
+  for _ in pairs(game.train_manager.get_trains({ surface = game.surfaces["freight"] })) do n = n + 1 end
+  log("FDBAL trains=" .. n)
 end)
 
 script.on_nth_tick(600, function()
