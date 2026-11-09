@@ -23,6 +23,48 @@ script.on_init(function()
   snap("load")
 end)
 
+-- circuit inspector: every Site signals box, what it outputs, and every stop/signal wired to it
+script.on_nth_tick(120, function()
+  if storage.circ_logged then return end
+  storage.circ_logged = true
+  local surf = game.surfaces["freight"]
+  for _, e in pairs(surf.find_entities_filtered({ type = { "constant-combinator", "decider-combinator", "arithmetic-combinator" } })) do
+    log("FDCIRC combinator " .. e.name .. " at " .. e.position.x .. "," .. e.position.y)
+  end
+  for _, st in pairs(surf.find_entities_filtered({ type = "train-stop" })) do
+    local cb = st.get_control_behavior()
+    if cb and (cb.circuit_enable_disable or st.get_circuit_network(defines.wire_connector_id.circuit_red) or st.get_circuit_network(defines.wire_connector_id.circuit_green)) then
+      local rn = st.get_circuit_network(defines.wire_connector_id.circuit_red)
+      local gn = st.get_circuit_network(defines.wire_connector_id.circuit_green)
+      log("FDCIRC stop " .. st.backer_name .. " at " .. st.position.x .. "," .. st.position.y .. " enable_disable=" .. tostring(cb.circuit_enable_disable) ..
+        " disabled=" .. tostring(cb.disabled) .. " cond=" .. serpent.line(cb.circuit_condition) ..
+        " red=" .. serpent.line(rn and rn.signals) .. " green=" .. serpent.line(gn and gn.signals))
+    end
+  end
+  for _, box in pairs(surf.find_entities_filtered({ name = "fd-site-signals" })) do
+    local cb0 = box.get_control_behavior()
+    local sec = cb0 and cb0.get_section(1)
+    log("FDCIRC box at " .. box.position.x .. "," .. box.position.y .. " signals=" .. serpent.line(sec and sec.filters))
+    for _, wid in pairs({ defines.wire_connector_id.circuit_red, defines.wire_connector_id.circuit_green }) do
+      local c = box.get_wire_connector(wid, false)
+      for _, conn in pairs(c and c.connections or {}) do
+        local o = conn.target.owner
+        local line = "FDCIRC   wire " .. wid .. " -> " .. o.name .. " " .. (o.backer_name or "") .. " at " .. o.position.x .. "," .. o.position.y
+        local cb = o.get_control_behavior()
+        if cb and o.type == "train-stop" then
+          line = line .. " enable_disable=" .. tostring(cb.circuit_enable_disable) .. " disabled=" .. tostring(cb.disabled) ..
+            " cond=" .. serpent.line(cb.circuit_condition)
+          local net = o.get_circuit_network(conn.target.wire_connector_id)
+          line = line .. " net_signals=" .. serpent.line(net and net.signals)
+        elseif cb and o.type == "rail-signal" then
+          line = line .. " close=" .. tostring(cb.close_signal) .. " cond=" .. serpent.line(cb.circuit_condition) .. " state=" .. tostring(o.signal_state)
+        end
+        log(line)
+      end
+    end
+  end
+end)
+
 -- balance report, about 1 min after load (also, on_init runs BEFORE the main mod's on_configuration_changed)
 script.on_nth_tick(60, function()
   if game.tick - (storage.start or 0) < 3660 then return end

@@ -28,8 +28,13 @@ for _, c in pairs(cargo) do
     {
       type = "item",
       name = c.name,
-      icon = c.icon,
-      icon_size = 64,
+      -- small locomotive badge (bottom right) so these never look like the vanilla item with
+      -- the same picture (wood, coal, iron ore, steel plate, blueprint, iron chest), which matters
+      -- when picking a signal for a circuit condition
+      icons = {
+        { icon = c.icon, icon_size = 64 },
+        { icon = "__base__/graphics/icons/locomotive.png", icon_size = 64, scale = 0.25, shift = { 8, 8 } },
+      },
       subgroup = "fd-cargo",
       order = c.order,
       stack_size = 50,
