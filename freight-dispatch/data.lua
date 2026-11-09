@@ -15,7 +15,7 @@ data:extend({
 
 local cargo = {
   { name = "fd-passengers", icon = "__core__/graphics/icons/entity/character.png", order = "a" },
-  { name = "fd-mail",       icon = "__base__/graphics/icons/blueprint.png",        order = "b" },
+  { name = "fd-mail",       icon = "__freight-dispatch__/graphics/mail.png",       order = "b" },
   { name = "fd-coal",       icon = "__base__/graphics/icons/coal.png",             order = "c" },
   { name = "fd-iron-ore",   icon = "__base__/graphics/icons/iron-ore.png",         order = "d" },
   { name = "fd-wood",       icon = "__base__/graphics/icons/wood.png",             order = "e" },
