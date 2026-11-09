@@ -406,6 +406,14 @@ function M.site_detail(site)
     local top = kind.full_yield / kind.base_yield
     local stock = "Stockpile: " .. main_i .. " " .. fmt(site.input[kind.main] or 0) .. ", " ..
       boost_i .. " " .. fmt(site.input[kind.booster] or 0)
+    if site.input_full_tick and game.tick - site.input_full_tick < 180 then
+      stock = stock .. " (full: trains wait to unload)"
+    end
+    if site.output_full then
+      local out_i = "[item=" .. kind.produces[1] .. "]"
+      return "Paused: output full (" .. out_i .. " " .. fmt(site.stock[kind.produces[1]] or 0) ..
+        "). Ship it out to restart. " .. stock
+    end
     if not site.made_tick or game.tick - site.made_tick > 120 then
       return "Idle: needs " .. main_i .. " " .. main_l .. " (" .. boost_i .. " " .. boost_l ..
         " only boosts it, up to x" .. top .. "). " .. stock
@@ -808,8 +816,9 @@ local function service_train(train)
       local budget = load_rate()
       local rec = storage.wagons[wagon.unit_number] or {}
       -- unload (instant, no rate limit): every lot that has travelled far enough comes off
-      -- and is paid. Lots still near their origin stay aboard. Untracked cargo (more in the
-      -- wagon than we have records for) gets off for free so wagons can never jam.
+      -- and is paid, as far as the site has room (mills and factories: input pile). Lots still
+      -- near their origin stay aboard. Untracked cargo (more in the wagon than we have records
+      -- for) gets off for free.
       for _, site in pairs(sites) do
         for _, item in pairs(C.KINDS[site.kind].accepts) do
           local have = inv.get_item_count(item)
@@ -821,9 +830,17 @@ local function service_train(train)
             local keep = {}
             local deliver = 0
             local avail = have - untracked
+            -- back-pressure (0.3.4): steel mills and factories only take what fits in their
+            -- input pile; the rest stays aboard and comes off on later seconds as room opens.
+            -- Towns and power plants have no pile and take everything.
+            local room = math.huge
+            if C.KINDS[site.kind].secondary then
+              room = math.max(0, math.floor(C.INPUT_CAP - (site.input[item] or 0)))
+            end
             for _, lot in ipairs(lots) do
-              if dist(lot.ox, lot.oy, site.x, site.y) >= C.MIN_DIST and avail > 0 then
-                local take = math.min(math.floor(lot.amount + 0.001), avail)
+              if dist(lot.ox, lot.oy, site.x, site.y) >= C.MIN_DIST and avail > 0 and room > 0 then
+                local take = math.min(math.floor(lot.amount + 0.001), avail, room)
+                room = room - take
                 if take > 0 then
                   paid = paid + payment(lot, site, item, take)
                   deliver = deliver + take
@@ -832,6 +849,16 @@ local function service_train(train)
                 end
               end
               if lot.amount > 0.001 then table.insert(keep, lot) end
+            end
+            if room <= 0 and #keep > 0 then
+              site.input_full_tick = game.tick
+              if throttle("inputfull" .. site.id .. item, 5 * 3600) then
+                game.print("[color=orange]" .. site_title(site) .. ": [item=" .. item .. "] " .. C.CARGO[item].label ..
+                  " pile is full (" .. fmt(C.INPUT_CAP) .. "). Trains there keep the rest aboard until there is room" ..
+                  (item == C.KINDS[site.kind].booster and (" (" .. C.CARGO[item].label .. " is only used up while [item=" ..
+                    C.KINDS[site.kind].main .. "] " .. C.CARGO[C.KINDS[site.kind].main].label .. " is being processed)") or "") ..
+                  ". [gps=" .. site.x .. "," .. site.y .. "," .. C.SURFACE .. "]")
+              end
             end
             local n = deliver + untracked
             if n > 0 then
@@ -950,13 +977,20 @@ local function simulate_second()
       -- the booster alone makes nothing; it raises the yield of the main input.
       local main = site.input[kind.main] or 0
       local p = math.min(main, C.PROCESS_RATE * site.level)
-      if p > 0 then
+      local item = kind.produces[1]
+      local room = cap - (site.stock[item] or 0)
+      site.output_full = p > 0 and room < 1
+      if p > 0 and room >= 1 then
         local b = math.min(site.input[kind.booster] or 0, p * 0.5)
         local frac = b / (p * 0.5)
         local out = p * (kind.base_yield + (kind.full_yield - kind.base_yield) * frac)
+        -- pause instead of wasting: only process what the output pile can hold (0.3.4)
+        if out > room then
+          local f = room / out
+          p, b, out = p * f, b * f, room
+        end
         site.input[kind.main] = main - p
         site.input[kind.booster] = (site.input[kind.booster] or 0) - b
-        local item = kind.produces[1]
         site.stock[item] = math.min(cap, (site.stock[item] or 0) + out)
         site.boost = frac
         site.made = out
@@ -1723,6 +1757,14 @@ remote.add_interface("freight_dispatch", {
   buy_upgrade = function(id) M.buy_upgrade(nil, id); return storage.upgrades[id] end,
   site_detail = function(id) return storage.sites[id] and M.site_detail(storage.sites[id]) end,
   set_input = function(id, item, amount) storage.sites[id].input[item] = amount end,
+  get_input = function(id, item) return storage.sites[id].input[item] end,
+  set_stock = function(id, item, amount) storage.sites[id].stock[item] = amount end,
+  -- test hook: put cargo in a wagon as if it had been loaded at site `origin_id`
+  inject_cargo = function(wagon, item, amount, origin_id)
+    local n = wagon.get_inventory(defines.inventory.cargo_wagon).insert({ name = item, count = amount })
+    if n > 0 then add_loaded(wagon, item, n, storage.sites[origin_id]) end
+    return n
+  end,
   served = function()
     local n = 0
     for _ in pairs(served_ids()) do n = n + 1 end

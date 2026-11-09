@@ -29,6 +29,7 @@ New towns and industries stop appearing once you have plenty of unserved ones, a
 [item=fd-iron-ore] Iron Mine -> Steel Mill. Coal is a booster: steel output goes up to x2 with half a coal per ore. Coal alone makes nothing.
 [item=fd-steel] Steel Mill -> Factory. [item=fd-wood] Lumber is a booster: goods output goes up to x2 with half a lumber per steel. Lumber alone makes nothing.
 [item=fd-goods] Factory -> Towns (the only way towns grow)
+Steel mills and factories hold up to 20,000 of each input. When a pile is full, trains unload only what fits and keep the rest aboard: with "Empty cargo" they wait until it all fits, and with a time condition they leave with it. When the output pile is full, the site pauses instead of wasting anything. Nothing is ever thrown away.
 [item=fd-passengers][item=fd-mail] Town <-> Town
 
 [font=default-bold]Building[/font]
@@ -50,6 +51,13 @@ To wire it: click the red or green wire button in the shortcut bar (bottom right
 - Keep a mill at full boost: wire the box to the mill's ore drop-off stop and choose "Enable/disable" with [item=fd-coal] Coal > 1000. Ore only arrives while there is coal to boost it, and the mill eats ore within seconds, so every unit gets the full x2. Do the same at a factory's steel stop with [item=fd-wood] Lumber > 1000.
 - A disabled stop is skipped, so the train goes on to its next stop. To hold the train instead, wire a rail signal before the stop (on a siding off the main line) and set it to close when Coal < 1000.
 - Only send a train when there is a full load: wire a town's box to its stop and enable it while [item=fd-passengers] Passengers > 4000.
+
+[font=default-bold]Combining conditions: Decider combinator (no power)[/font]
+A stop or signal takes only one condition. To combine several, buy a [item=fd-decider] Decider combinator in the Shop. Wire the Site signals box to its input side, and its output side to the stop. In the decider, add conditions (switch the joiner between AND and OR), and set the output to a signal such as [virtual-signal=signal-red] = 1. Then set the stop to Enable/disable with [virtual-signal=signal-red] = 0, so the stop is on unless the decider fires. Useful rules:
+- Steel mill, coal stop: [item=fd-coal] Coal > 15000
+- Steel mill, ore stop: [item=fd-iron-ore] Iron ore > 15000 OR [item=fd-coal] Coal < 1000
+- Factory, steel stop: [item=fd-steel] Steel > 15000 OR [item=fd-wood] Lumber < 1000
+(A single condition like the coal stop's needs no decider: enable the stop while Coal < 15000.)
 ]]
 
 local function hud(player)

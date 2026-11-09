@@ -41,6 +41,7 @@ C.PRICES = {
   ["car"] = 4000,
   ["small-lamp"] = 30,
   ["fd-site-signals"] = 2000,
+  ["fd-decider"] = 5000,
 }
 
 C.SHOP = {
@@ -52,6 +53,7 @@ C.SHOP = {
   { item = "cargo-wagon", ghost = true, note = "Carries cargo. Capacity depends on your wagon upgrade." },
   { item = "landfill", ghost = true, note = "Fill in water to build across lakes." },
   { item = "fd-site-signals", ghost = true, note = "Build in a site's ring: outputs its stockpile as circuit signals. Wire it to a stop or rail signal (see Help)." },
+  { item = "fd-decider", ghost = true, note = "Needs no power. Combine conditions with AND/OR, e.g. Steel > 15000 OR Lumber < 1000 (see Help)." },
 }
 
 -- Upgrades (Shop). Tier 1 is what you start with. Each applies to every train at once.

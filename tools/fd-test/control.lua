@@ -26,6 +26,7 @@ local function build()
   local a = remote.call("freight_dispatch", "create_site", "town", 0, Y, 3000)
   local b = remote.call("freight_dispatch", "create_site", "town", 360, Y, 3000)
   L("sites", a, b)
+  storage.town_a = a
   for _, id in pairs({ a, b }) do
     local s = remote.call("freight_dispatch", "site", id)
     if s then L("town", id, "buildings=" .. tostring(s.building_count), "radius=" .. tostring(s.radius)) end
@@ -133,6 +134,43 @@ local function circuit_check(tick)
   L("stop cond=" .. scb.circuit_condition.constant .. " disabled=" .. tostring(scb.disabled) ..
     " | sig close_cond=" .. (sig and sig.get_control_behavior().circuit_condition.constant or -1) ..
     " state=" .. tostring(sigstate) .. " (open=" .. defines.signal_state.open .. " closed=" .. defines.signal_state.closed .. ")")
+  -- powerless decider: box -> decider input (red); read the decider's green output
+  if tick == 1200 then
+    local surf = box.surface
+    local dp = surf.find_non_colliding_position("fd-decider", { box.position.x + 2, box.position.y + 2 }, 6, 0.5)
+    local d = dp and surf.create_entity({ name = "fd-decider", position = dp, force = "player", raise_built = true })
+    if d then
+      box.get_wire_connector(defines.wire_connector_id.circuit_red, true).connect_to(
+        d.get_wire_connector(defines.wire_connector_id.combinator_input_red, true))
+      -- an output only has a network once something is wired to it: wire it to stop A (green)
+      d.get_wire_connector(defines.wire_connector_id.combinator_output_green, true).connect_to(
+        sa.get_wire_connector(defines.wire_connector_id.circuit_green, true))
+      local p = { type = "item", name = "fd-passengers" }
+      d.get_control_behavior().parameters = {
+        conditions = {
+          { first_signal = p, comparator = ">", constant = 1000000000 },
+          { first_signal = { type = "item", name = "fd-mail" }, comparator = ">", constant = 1, compare_type = "or" },
+        },
+        outputs = { { signal = { type = "virtual", name = "signal-red" }, constant = 1, copy_count_from_input = false } },
+        else_outputs = { { signal = { type = "virtual", name = "signal-green" }, constant = 1, copy_count_from_input = false } },
+      }
+      storage.decider = d
+    end
+    L("decider placed", tostring(d ~= nil))
+  end
+  local d = storage.decider
+  if d and d.valid then
+    local net = d.get_circuit_network(defines.wire_connector_id.combinator_output_green)
+    local rnet = d.get_circuit_network(defines.wire_connector_id.combinator_output_red)
+    L("decider out green=" .. serpent.line(net and net.signals) .. " red=" .. serpent.line(rnet and rnet.signals) ..
+      " (pax>1e9 OR mail>1 -> signal-red, else signal-green)")
+    if tick == 1800 then
+      -- now make it false: pax > 1e9 AND mail > 1
+      local pr = d.get_control_behavior().parameters
+      pr.conditions[2].compare_type = "and"
+      d.get_control_behavior().parameters = pr
+    end
+  end
   if tick == 1800 then
     scb.circuit_condition = { first_signal = { type = "item", name = "fd-passengers" }, comparator = ">", constant = 1000000000 }
     if sig then sig.get_control_behavior().circuit_condition = { first_signal = { type = "item", name = "fd-passengers" }, comparator = ">", constant = 1 } end
@@ -174,6 +212,26 @@ script.on_nth_tick(600, function(e)
   end
   if e.tick >= 1200 and e.tick <= 3000 then circuit_check(e.tick) end
   if e.tick == 6000 then upgrade_test() end
+  -- back-pressure: a factory overlapping stop B with a nearly full steel pile; 3,000 steel in the train
+  if e.tick == 6000 then
+    local f2 = remote.call("freight_dispatch", "create_site", "factory", 352, Y + 12)
+    remote.call("freight_dispatch", "set_input", f2, "fd-steel", 19000)
+    storage.f2 = f2
+    local t = storage.train
+    L("injected steel=" .. remote.call("freight_dispatch", "inject_cargo", t.cargo_wagons[1], "fd-steel", 3000, storage.town_a))
+  end
+  if storage.f2 and e.tick > 6000 then
+    local t = storage.train
+    L("backpressure: f2 steel pile=" .. math.floor(remote.call("freight_dispatch", "get_input", storage.f2, "fd-steel") or 0) ..
+      " train steel=" .. t.get_item_count("fd-steel") .. " at=" .. tostring(t.station and t.station.backer_name) ..
+      " | " .. tostring(remote.call("freight_dispatch", "site_detail", storage.f2)))
+  end
+  -- pause when output full: fill the test mill's steel output to its cap
+  if e.tick == 8400 then remote.call("freight_dispatch", "set_stock", storage.mill, "fd-steel", 4000) end
+  if e.tick == 9000 or e.tick == 9600 then
+    L("mill after fill: " .. tostring(remote.call("freight_dispatch", "site_detail", storage.mill)) ..
+      " ore pile=" .. math.floor(remote.call("freight_dispatch", "get_input", storage.mill, "fd-iron-ore") or 0))
+  end
   if storage.mill and e.tick >= 6600 then
     if e.tick == 7200 then remote.call("freight_dispatch", "set_input", storage.factory, "fd-wood", 5000) end
     L("mill: " .. tostring(remote.call("freight_dispatch", "site_detail", storage.mill)))

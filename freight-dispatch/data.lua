@@ -163,3 +163,24 @@ do
     },
   })
 end
+
+-- Decider combinator that needs no power (Shop). This world has no electricity, so the
+-- vanilla one stays locked. Same GUI and behaviour: several conditions with AND/OR.
+do
+  local dc = table.deepcopy(data.raw["decider-combinator"]["decider-combinator"])
+  local icons = { { icon = "__base__/graphics/icons/decider-combinator.png", icon_size = 64, tint = { 1, 0.85, 0.45, 1 } } }
+  dc.name = "fd-decider"
+  dc.icon = nil
+  dc.icons = icons
+  dc.minable = { mining_time = 0.1, result = "fd-decider" }
+  dc.energy_source = { type = "void" }
+  dc.fast_replaceable_group = nil
+  dc.next_upgrade = nil
+  data:extend({
+    dc,
+    { type = "item", name = "fd-decider", icons = icons, subgroup = "fd-cargo", order = "y2", place_result = "fd-decider", stack_size = 50 },
+    { type = "recipe", name = "fd-decider", enabled = false,
+      ingredients = { { type = "item", name = "electronic-circuit", amount = 5 } },
+      results = { { type = "item", name = "fd-decider", amount = 1 } } },
+  })
+end
