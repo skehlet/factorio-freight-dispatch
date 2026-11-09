@@ -1,4 +1,4 @@
--- Save inspector for Freight Dispatch. NOT for players.
+﻿-- Save inspector for Freight Dispatch. NOT for players.
 -- Added to a COPY of the user's save. on_init runs when it is "added" to the save:
 --   1. calls the mod's debug_dump remote (FDDUMP lines: every train's schedule, wagons,
 --      per-lot cargo records, stops and their linked sites, towns' stock, contracts)
@@ -23,8 +23,9 @@ script.on_init(function()
   snap("load")
 end)
 
--- town layout check, 1 s after load (on_init runs BEFORE the main mod's on_configuration_changed)
+-- balance report, about 1 min after load (also, on_init runs BEFORE the main mod's on_configuration_changed)
 script.on_nth_tick(60, function()
+  if game.tick - (storage.start or 0) < 3660 then return end
   if storage.towns_logged then return end
   storage.towns_logged = true
   local n = 0

@@ -18,7 +18,7 @@ You run a railway company. You don't build a factory here. Towns and industries 
 
 [font=default-bold]3. Get paid.[/font] Pay = amount x straight-line distance x cargo rate x speed bonus. Slow deliveries pay less, and passengers and mail lose value fastest. Cargo must travel at least 60 tiles.
 
-[font=default-bold]4. Grow.[/font] Industries level up as you ship from them, which raises production. Towns grow when you deliver goods, mail and passengers, and bigger towns make more passengers. Growth slows down once a town passes about 1,000 people, so big cities take a while. More output means more trains, and more trains means you need good signalling. Watch for deadlock and train-wreck alerts. Each site's second status line (on the map and in the Sites list) shows what drives it: a town's growth per minute by source, or an industry's output multiplier and stockpile.
+[font=default-bold]4. Grow.[/font] Industries level up as you ship from them, which raises production. Towns grow only from goods: passengers and mail are your steady income, and goods from factories are what turn a village into a city. Bigger towns make more passengers and mail, but each new resident needs more goods as a town grows. More output means more trains, and more trains means you need good signalling. Watch for deadlock and train-wreck alerts. Each site's second status line (on the map and in the Sites list) shows what drives it: a town's growth per minute by source, or an industry's output multiplier and stockpile.
 
 [font=default-bold]5. Upgrade.[/font] The Shop sells upgrades that apply to every train at once: better fuel (faster acceleration and top speed), bigger cargo wagons, and station crews that load faster. Running shoes make you run faster.
 
@@ -28,7 +28,7 @@ New towns and industries stop appearing once you have plenty of unserved ones, a
 [item=fd-coal] Coal Mine -> Power Plant or Steel Mill
 [item=fd-iron-ore] Iron Mine -> Steel Mill. Coal is a booster: steel output goes up to x2 with half a coal per ore. Coal alone makes nothing.
 [item=fd-steel] Steel Mill -> Factory. [item=fd-wood] Lumber is a booster: goods output goes up to x2 with half a lumber per steel. Lumber alone makes nothing.
-[item=fd-goods] Factory -> Towns (towns grow fast)
+[item=fd-goods] Factory -> Towns (the only way towns grow)
 [item=fd-passengers][item=fd-mail] Town <-> Town
 
 [font=default-bold]Building[/font]

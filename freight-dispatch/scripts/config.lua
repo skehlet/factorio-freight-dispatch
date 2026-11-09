@@ -87,21 +87,23 @@ C.CARGO = {
   ["fd-coal"]       = { rate = 1.0, decay = 1500, label = "Coal" },
   ["fd-iron-ore"]   = { rate = 1.0, decay = 1500, label = "Iron ore" },
   ["fd-wood"]       = { rate = 1.2, decay = 1000, label = "Lumber" },
-  ["fd-steel"]      = { rate = 2.0, decay = 700, label = "Steel" },
-  ["fd-goods"]      = { rate = 3.0, decay = 400, label = "Goods" },
+  ["fd-steel"]      = { rate = 3.0, decay = 700, label = "Steel" },
+  ["fd-goods"]      = { rate = 5.0, decay = 400, label = "Goods" },
 }
 
--- population gained per unit delivered to a town
-C.TOWN_GROWTH = {
-  ["fd-passengers"] = 0.004,
-  ["fd-mail"] = 0.01,
-  ["fd-goods"] = 0.08,
-}
--- Big-town slowdown: above this population, every source of town growth is scaled by
--- sqrt(GROWTH_REF / pop), so towns keep growing steadily instead of compounding without
--- limit (pop 4,000: x0.5, pop 16,000: x0.25). Before 0.2.2 a served town doubled about
--- every 70 minutes.
-C.GROWTH_REF = 1000
+-- Towns grow ONLY from goods (0.3.0). Passengers and mail are steady income, not growth.
+-- Goods per new resident = GOODS_PER_RESIDENT x max(1, pop / 1000), so a town of 10,000
+-- needs 500 goods per resident. Roughly: pop^2 rises by 40 per good delivered.
+-- (Before 0.3.0 passengers, mail and plain service all compounded growth, and a playtest
+-- reached 96k-pop towns.)
+C.GOODS_PER_RESIDENT = 50
+-- town cargo (everything else counts as freight, e.g. for contract weighting and size)
+C.TOWN_CARGO = { ["fd-passengers"] = true, ["fd-mail"] = true }
+
+-- Primary industries: output = base x (1 + LEVEL_BONUS x (level - 1)) x service.
+-- Secondary industries process up to PROCESS_RATE x level of their main input per second.
+C.LEVEL_BONUS = 1.0
+C.PROCESS_RATE = 50
 
 C.KINDS = {
   ["town"] = {
@@ -110,20 +112,20 @@ C.KINDS = {
   },
   ["coal-mine"] = {
     label = "Coal Mine", icon = "fd-coal", radius = 18, color = { 0.75, 0.75, 0.8 },
-    produces = { "fd-coal" }, accepts = {}, base = { ["fd-coal"] = 5 },
+    produces = { "fd-coal" }, accepts = {}, base = { ["fd-coal"] = 12 },
   },
   ["iron-mine"] = {
     label = "Iron Mine", icon = "fd-iron-ore", radius = 18, color = { 0.55, 0.75, 1 },
-    produces = { "fd-iron-ore" }, accepts = {}, base = { ["fd-iron-ore"] = 5 },
+    produces = { "fd-iron-ore" }, accepts = {}, base = { ["fd-iron-ore"] = 12 },
   },
   ["forest"] = {
     label = "Lumber Camp", icon = "fd-wood", radius = 18, color = { 0.5, 0.9, 0.4 },
-    produces = { "fd-wood" }, accepts = {}, base = { ["fd-wood"] = 4 },
+    produces = { "fd-wood" }, accepts = {}, base = { ["fd-wood"] = 10 },
   },
   ["steel-mill"] = {
     label = "Steel Mill", icon = "fd-steel", radius = 18, color = { 1, 0.55, 0.4 },
     produces = { "fd-steel" }, accepts = { "fd-iron-ore", "fd-coal" }, secondary = true,
-    -- processes up to 25 x level of `main` per second; output per unit goes from base_yield
+    -- processes up to PROCESS_RATE x level of `main` per second; output per unit goes from base_yield
     -- to full_yield as `booster` is supplied (0.5 booster per main unit = full boost)
     main = "fd-iron-ore", booster = "fd-coal", base_yield = 0.5, full_yield = 1,
   },
@@ -145,7 +147,7 @@ C.KIND_WEIGHTS = {
 }
 
 -- shipped units needed to reach the next industry level
-C.LEVEL_AT = { 8000, 24000, 60000, 140000 }
+C.LEVEL_AT = { 20000, 60000, 150000, 350000 }
 
 C.STARTERS = {
   { kind = "town", x = 40, y = -30, pop = 700 },

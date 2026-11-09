@@ -66,9 +66,9 @@ local function flying_text(position, text, color, player)
   end
 end
 
--- Town growth multiplier: 1 up to C.GROWTH_REF population, then sqrt(REF / pop).
-function M.growth_damp(site)
-  return math.min(1, math.sqrt(C.GROWTH_REF / math.max(1, site.pop)))
+-- Goods a town needs per new resident; rises with population so big cities take many goods.
+function M.goods_per_resident(site)
+  return C.GOODS_PER_RESIDENT * math.max(1, site.pop / 1000)
 end
 
 local function earn(amount)
@@ -393,25 +393,13 @@ end
 function M.site_detail(site)
   local kind = C.KINDS[site.kind]
   if site.kind == "town" then
-    local g = site.growth
-    if not g then return "Growth: measuring (updates every minute)" end
-    local total, parts = 0, {}
-    for _, it in pairs({ "fd-goods", "fd-mail", "fd-passengers" }) do
-      local v = g[it] or 0
-      total = total + v
-      if v >= 0.5 then table.insert(parts, "[item=" .. it .. "] +" .. fmt(v)) end
+    local per = "Each new resident needs " .. fmt(M.goods_per_resident(site)) .. " [item=fd-goods]"
+    local gained = site.growth and site.growth["fd-goods"] or 0
+    if gained < 0.5 then
+      return "Stable. Deliver [item=fd-goods] Goods to grow. " .. per .. "."
     end
-    if (g.service or 0) > 0 then
-      total = total + g.service
-      table.insert(parts, "regular service +" .. fmt(g.service))
-    end
-    if total < 0.5 then
-      return "Not growing. Pick up here regularly, and deliver goods, mail or passengers."
-    end
-    local damp = M.growth_damp(site)
-    local slow = damp < 0.99 and (", big-town slowdown x" .. string.format("%.2f", damp)) or ""
-    return "Growing +" .. fmt(total) .. "/min (" .. string.format("%.1f", total / math.max(1, site.pop) * 100) ..
-      "%): " .. table.concat(parts, ", ") .. slow
+    return "Growing +" .. fmt(gained) .. "/min (" .. string.format("%.1f", gained / math.max(1, site.pop) * 100) ..
+      "%) from [item=fd-goods] Goods. " .. per .. "."
   elseif kind.main then
     local main_l, boost_l = C.CARGO[kind.main].label, C.CARGO[kind.booster].label
     local main_i, boost_i = "[item=" .. kind.main .. "]", "[item=" .. kind.booster .. "]"
@@ -701,11 +689,11 @@ local function on_delivered(site, item, amount)
   end
   site.recv = site.recv or {}
   site.recv[item] = (site.recv[item] or 0) + amount
-  if site.kind == "town" then
-    local g = (C.TOWN_GROWTH[item] or 0) * M.growth_damp(site)
-    site.pop = site.pop + amount * g
+  if site.kind == "town" and item == "fd-goods" then
+    local gain = amount / M.goods_per_resident(site)
+    site.pop = site.pop + gain
     site.grow_acc = site.grow_acc or {}
-    site.grow_acc[item] = (site.grow_acc[item] or 0) + amount * g
+    site.grow_acc[item] = (site.grow_acc[item] or 0) + gain
   end
   -- contracts
   for _, ct in pairs(storage.contracts) do
@@ -894,7 +882,7 @@ local function simulate_second()
       site.stock["fd-passengers"] = math.min(cap, (site.stock["fd-passengers"] or 0) + pax)
       site.stock["fd-mail"] = math.min(cap / 4, (site.stock["fd-mail"] or 0) + mail)
     elseif kind.base then
-      local mult = (1 + 0.5 * (site.level - 1)) * service
+      local mult = (1 + C.LEVEL_BONUS * (site.level - 1)) * service
       for item, rate in pairs(kind.base) do
         site.stock[item] = math.min(cap, (site.stock[item] or 0) + rate * mult)
       end
@@ -902,7 +890,7 @@ local function simulate_second()
       -- steel mill (ore, boosted by coal) and factory (steel, boosted by lumber):
       -- the booster alone makes nothing; it raises the yield of the main input.
       local main = site.input[kind.main] or 0
-      local p = math.min(main, 25 * site.level)
+      local p = math.min(main, C.PROCESS_RATE * site.level)
       if p > 0 then
         local b = math.min(site.input[kind.booster] or 0, p * 0.5)
         local frac = b / (p * 0.5)
@@ -928,10 +916,6 @@ local function simulate_minute()
     if site.kind == "town" then
       -- last minute's growth, by source, for the status line
       local g = site.grow_acc or {}
-      if site.rating > 0.3 then
-        g.service = site.pop * 0.004 * M.growth_damp(site)
-        site.pop = site.pop + g.service
-      end
       site.growth = g
       site.grow_acc = {}
       grow_town_buildings(site)
@@ -1249,7 +1233,9 @@ local function new_contract()
     if s then
       for _, item in pairs(C.KINDS[s.kind].accepts) do
         if makes[item] then
-          table.insert(candidates, { site = s, item = item, w = (s.recv and (s.recv[item] or 0) > 0) and 4 or 1 })
+          local w = (s.recv and (s.recv[item] or 0) > 0) and 4 or 1
+          if not C.TOWN_CARGO[item] then w = w * 3 end -- freight contracts are more common
+          table.insert(candidates, { site = s, item = item, w = w })
         end
       end
     end
@@ -1278,8 +1264,11 @@ local function new_contract()
     if r <= 0 then c = cand; break end
   end
   local scale = 1 + math.min(4, storage.lifetime / 2000000)
-  local amount = math.floor((rand_int(3, 8) * 500 * scale) / 100) * 100
-  local reward = math.floor(amount * C.CARGO[c.item].rate * 6 / 100) * 100
+  local freight = not C.TOWN_CARGO[c.item]
+  local amount = math.floor((rand_int(3, 8) * 500 * scale * (freight and 2 or 1)) / 100) * 100
+  -- bonus = what the cargo would earn over 1,200 tiles (freight) or 600 tiles (town cargo),
+  -- rounded to $100. Freight: double the amount and double the rate (0.3.0).
+  local reward = math.floor(amount * C.CARGO[c.item].rate * (freight and 12 or 6) / 100) * 100
   table.insert(storage.contracts, {
     site_id = c.site.id, item = c.item, amount = amount, delivered = 0,
     deadline = game.tick + C.CONTRACT_TICKS, reward = reward,
