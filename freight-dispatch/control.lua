@@ -71,6 +71,34 @@ function M.goods_per_resident(site)
   return C.GOODS_PER_RESIDENT * math.max(1, site.pop / 1000)
 end
 
+-- Train liveries (0.3.5): the mod paints each carriage once and remembers it in
+-- storage.painted[unit_number]. (Comparing colours doesn't work: new locomotives come out
+-- pure red rather than their prototype colour, and wagons copy the locomotive's colour.)
+-- A train takes the current colour of its first painted carriage, so a colour the player
+-- set by hand is kept and spreads to new carriages coupled on, or else a random
+-- C.TRAIN_COLORS entry. Carriages painted before are never repainted.
+local function paint_train(train)
+  if not (train and train.valid) then return end
+  storage.painted = storage.painted or {}
+  local target
+  for _, c in pairs(train.carriages) do
+    if storage.painted[c.unit_number] and c.color then target = c.color; break end
+  end
+  target = target or C.TRAIN_COLORS[rand_int(1, #C.TRAIN_COLORS)]
+  for _, c in pairs(train.carriages) do
+    if not storage.painted[c.unit_number] then
+      pcall(function()
+        c.color = target
+        -- otherwise the locomotive takes each (default red) stop's colour on arrival
+        if c.type == "locomotive" then c.copy_color_from_train_stop = false end
+      end)
+      storage.painted[c.unit_number] = true
+      script.register_on_object_destroyed(c)
+    end
+  end
+end
+M.paint_train = paint_train
+
 local function earn(amount)
   storage.money = storage.money + amount
   if amount > 0 then
@@ -850,16 +878,7 @@ local function service_train(train)
               end
               if lot.amount > 0.001 then table.insert(keep, lot) end
             end
-            if room <= 0 and #keep > 0 then
-              site.input_full_tick = game.tick
-              if throttle("inputfull" .. site.id .. item, 5 * 3600) then
-                game.print("[color=orange]" .. site_title(site) .. ": [item=" .. item .. "] " .. C.CARGO[item].label ..
-                  " pile is full (" .. fmt(C.INPUT_CAP) .. "). Trains there keep the rest aboard until there is room" ..
-                  (item == C.KINDS[site.kind].booster and (" (" .. C.CARGO[item].label .. " is only used up while [item=" ..
-                    C.KINDS[site.kind].main .. "] " .. C.CARGO[C.KINDS[site.kind].main].label .. " is being processed)") or "") ..
-                  ". [gps=" .. site.x .. "," .. site.y .. "," .. C.SURFACE .. "]")
-              end
-            end
+            if room <= 0 and #keep > 0 then site.input_full_tick = game.tick end
             local n = deliver + untracked
             if n > 0 then
               inv.remove({ name = item, count = n })
@@ -1547,8 +1566,22 @@ script.on_configuration_changed(function()
   if storage.disabled then return end
   init_storage()
   unlock_techs()
-  if game.surfaces[C.SURFACE] then relayout_towns() end
+  if game.surfaces[C.SURFACE] then
+    relayout_towns()
+    -- paint any train still in default red (all trains in saves from before 0.3.5)
+    for _, t in pairs(game.train_manager.get_trains({ surface = game.surfaces[C.SURFACE] })) do paint_train(t) end
+  end
   for _, p in pairs(game.players) do gui.build_hud(p) end
+end)
+
+-- A train forms or changes whenever a carriage is built, coupled or uncoupled. Each new
+-- carriage briefly forms a train of its own before coupling, so painting waits for the
+-- next second (when the train has settled; see on_nth_tick 60).
+script.on_event(defines.events.on_train_created, function(e)
+  if e.train.valid and e.train.carriages[1].surface.name == C.SURFACE then
+    storage.paint_queue = storage.paint_queue or {}
+    table.insert(storage.paint_queue, e.train)
+  end
 end)
 
 ---------------------------------------------------------------------------
@@ -1685,7 +1718,10 @@ script.on_event(defines.events.on_train_changed_state, function(e)
 end)
 
 script.on_event(defines.events.on_object_destroyed, function(e)
-  if e.useful_id then storage.wagons[e.useful_id] = nil end
+  if e.useful_id then
+    storage.wagons[e.useful_id] = nil
+    if storage.painted then storage.painted[e.useful_id] = nil end
+  end
 end)
 
 script.on_event(defines.events.on_entity_died, function(e)
@@ -1710,6 +1746,10 @@ end)
 script.on_nth_tick(60, function(e)
   simulate_second()
   update_signal_boxes()
+  if storage.paint_queue and #storage.paint_queue > 0 then
+    for _, t in pairs(storage.paint_queue) do paint_train(t) end -- skips trains merged since
+    storage.paint_queue = {}
+  end
   for id, train in pairs(storage.waiting) do
     if train.valid and train.state == defines.train_state.wait_station then
       service_train(train)
@@ -1758,6 +1798,19 @@ remote.add_interface("freight_dispatch", {
   site_detail = function(id) return storage.sites[id] and M.site_detail(storage.sites[id]) end,
   set_input = function(id, item, amount) storage.sites[id].input[item] = amount end,
   get_input = function(id, item) return storage.sites[id].input[item] end,
+  -- test hook: every train's carriage colours, as "r,g,b" strings
+  train_colors = function()
+    local out = {}
+    for _, t in pairs(game.train_manager.get_trains({ surface = game.surfaces[C.SURFACE] })) do
+      local cs = {}
+      for _, c in pairs(t.carriages) do
+        local col = c.color
+        table.insert(cs, c.type .. "=" .. (col and string.format("%.2f,%.2f,%.2f", col.r, col.g, col.b) or "nil"))
+      end
+      out[t.id] = table.concat(cs, " ")
+    end
+    return out
+  end,
   set_stock = function(id, item, amount) storage.sites[id].stock[item] = amount end,
   -- test hook: put cargo in a wagon as if it had been loaded at site `origin_id`
   inject_cargo = function(wagon, item, amount, origin_id)

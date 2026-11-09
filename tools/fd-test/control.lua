@@ -218,6 +218,7 @@ script.on_nth_tick(600, function(e)
     remote.call("freight_dispatch", "set_input", f2, "fd-steel", 19000)
     storage.f2 = f2
     local t = storage.train
+    L("colors: " .. serpent.line(remote.call("freight_dispatch", "train_colors")))
     L("injected steel=" .. remote.call("freight_dispatch", "inject_cargo", t.cargo_wagons[1], "fd-steel", 3000, storage.town_a))
   end
   if storage.f2 and e.tick > 6000 then

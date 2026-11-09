@@ -98,6 +98,9 @@ script.on_nth_tick(60, function()
   local n = 0
   for _ in pairs(game.train_manager.get_trains({ surface = game.surfaces["freight"] })) do n = n + 1 end
   log("FDBAL trains=" .. n)
+  local cols = remote.call("freight_dispatch", "train_colors")
+  local k = 0
+  for id, s in pairs(cols) do k = k + 1; if k <= 6 then log("FDBAL color train " .. id .. ": " .. s) end end
   local f = game.forces.player
   log("FDBAL circuit tech=" .. tostring(f.technologies["circuit-network"].researched) .. " decider recipe=" .. tostring(f.recipes["decider-combinator"].enabled) .. " box recipe=" .. tostring(f.recipes["fd-site-signals"].enabled) .. " rail recipe=" .. tostring(f.recipes["rail"].enabled) .. " fd-decider recipe=" .. tostring(f.recipes["fd-decider"].enabled))
 end)

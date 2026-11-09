@@ -162,6 +162,26 @@ C.STARTERS = {
 
 C.TECHS = { "railway", "automated-rail-transportation", "rail-signals", "landfill", "automobilism", "lamp", "circuit-network" }
 
+-- Livery palette: each new train gets one of these on every carriage (only carriages still in
+-- the default colour; a colour you set yourself is kept and spreads to carriages coupled on).
+-- Alpha 0.5 matches how vanilla tints rolling stock.
+C.TRAIN_COLORS = {
+  { r = 0.85, g = 0.15, b = 0.10, a = 0.5 }, -- signal red
+  { r = 0.95, g = 0.55, b = 0.10, a = 0.5 }, -- orange
+  { r = 0.95, g = 0.82, b = 0.15, a = 0.5 }, -- yellow
+  { r = 0.30, g = 0.70, b = 0.20, a = 0.5 }, -- green
+  { r = 0.05, g = 0.40, b = 0.20, a = 0.5 }, -- forest green
+  { r = 0.15, g = 0.75, b = 0.75, a = 0.5 }, -- teal
+  { r = 0.20, g = 0.45, b = 0.90, a = 0.5 }, -- blue
+  { r = 0.10, g = 0.15, b = 0.45, a = 0.5 }, -- navy
+  { r = 0.55, g = 0.25, b = 0.80, a = 0.5 }, -- purple
+  { r = 0.90, g = 0.40, b = 0.65, a = 0.5 }, -- pink
+  { r = 0.50, g = 0.10, b = 0.15, a = 0.5 }, -- maroon
+  { r = 0.55, g = 0.35, b = 0.18, a = 0.5 }, -- brown
+  { r = 0.85, g = 0.85, b = 0.85, a = 0.5 }, -- silver
+  { r = 0.18, g = 0.18, b = 0.20, a = 0.5 }, -- black
+}
+
 C.RANKS = {
   { at = 0, title = "Track Layer" },
   { at = 250000, title = "Signal Apprentice" },
