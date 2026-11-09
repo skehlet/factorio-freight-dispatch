@@ -409,7 +409,7 @@ function M.site_status(site)
     for _, it in pairs(kind.produces) do
       table.insert(waiting, "[item=" .. it .. "] " .. fmt(site.stock[it] or 0))
     end
-    table.insert(parts, "Waiting: " .. table.concat(waiting, ", "))
+    table.insert(parts, "Waiting for pickup: " .. table.concat(waiting, ", "))
   end
   if #kind.accepts > 0 then
     table.insert(parts, "Wants: " .. cargo_list_str(kind.accepts))
@@ -417,8 +417,42 @@ function M.site_status(site)
   return table.concat(parts, "  |  ")
 end
 
--- Second status line: what drives this site (town growth by source, industry boost).
+-- What an industry's level means, and how far it is from the next one.
+local function level_note(site)
+  local kind = C.KINDS[site.kind]
+  local need = C.LEVEL_AT[site.level]
+  local nxt = need and ("Next level at " .. fmt(need) .. " shipped (" .. fmt(site.shipped) .. " so far).")
+    or "Top level."
+  if kind.base then
+    local item, base = next(kind.base)
+    local mult = 1 + C.LEVEL_BONUS * (site.level - 1)
+    local service = 0.6 + 0.4 * site.rating
+    local s = string.format("Level %d: output x%d. ", site.level, mult)
+    if (site.stock[item] or 0) >= C.STOCK_CAP * site.level - 1 then
+      s = s .. "Stockpile full (" .. fmt(C.STOCK_CAP * site.level) .. "): production waits for a pickup"
+    else
+      s = s .. string.format("Making %.1f [item=%s]/s", base * mult * service, item)
+      if service < 0.99 then
+        s = s .. string.format(" (x%.2f until trains pick up every minute)", service)
+      end
+    end
+    return s .. ". " .. nxt
+  elseif kind.main then
+    return string.format("Level %d: processes up to %d [item=%s]/s. ", site.level, C.PROCESS_RATE * site.level, kind.main) .. nxt
+  end
+end
+
+-- Second status line: what drives this site (town growth by source, industry boost, level).
+local site_detail_core
 function M.site_detail(site)
+  local core = site_detail_core(site)
+  if site.kind == "town" then return core end
+  local lvl = #C.KINDS[site.kind].produces > 0 and level_note(site) or nil
+  if core and lvl then return core .. (core:sub(-1) == "." and " " or ". ") .. lvl end
+  return core or lvl
+end
+
+site_detail_core = function(site)
   local kind = C.KINDS[site.kind]
   if site.kind == "town" then
     local per = "Each new resident needs " .. fmt(M.goods_per_resident(site)) .. " [item=fd-goods]"
