@@ -407,7 +407,9 @@ function M.site_status(site)
   if #kind.produces > 0 then
     local waiting = {}
     for _, it in pairs(kind.produces) do
-      table.insert(waiting, "[item=" .. it .. "] " .. fmt(site.stock[it] or 0))
+      -- whole units only: trains load whole units, and a leftover fraction (e.g. 0.6) would
+      -- otherwise round up to a phantom "1" while a train is loading
+      table.insert(waiting, "[item=" .. it .. "] " .. fmt(math.floor(site.stock[it] or 0)))
     end
     table.insert(parts, "Waiting for pickup: " .. table.concat(waiting, ", "))
   end
