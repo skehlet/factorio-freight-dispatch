@@ -43,6 +43,13 @@ New towns and industries stop appearing once you have plenty of unserved ones, a
 [font=default-bold]Signalling refresher[/font]
 Rail signal: one train per block. Place it where a train should wait.
 Chain signal: looks ahead to the next signal. Put chain signals at junction entries and inside junctions, and a rail signal at each exit, so trains never stop in the middle of a junction.
+
+[font=default-bold]Circuits (optional): Site signals[/font]
+Buy [item=fd-site-signals] Site signals in the Shop and build it inside a site's ring, close to your stop or signal (wires reach about 9 tiles). Every second it outputs that site's stockpile: a steel mill shows its [item=fd-iron-ore] ore, [item=fd-coal] coal and [item=fd-steel] steel, a town its waiting [item=fd-passengers] passengers and [item=fd-mail] mail. It also outputs [virtual-signal=signal-P] population (towns) or [virtual-signal=signal-L] level (industries). No power is needed.
+To wire it: click the red or green wire button in the shortcut bar (bottom right), click the box, then click the train stop or rail signal. Then open the stop or signal and tick its circuit option.
+- Keep a mill at full boost: wire the box to the mill's ore drop-off stop and choose "Enable/disable" with [item=fd-coal] Coal > 1000. Ore only arrives while there is coal to boost it, and the mill eats ore within seconds, so every unit gets the full x2. Do the same at a factory's steel stop with [item=fd-wood] Lumber > 1000.
+- A disabled stop is skipped, so the train goes on to its next stop. To hold the train instead, wire a rail signal before the stop (on a siding off the main line) and set it to close when Coal < 1000.
+- Only send a train when there is a full load: wire a town's box to its stop and enable it while [item=fd-passengers] Passengers > 4000.
 ]]
 
 local function hud(player)

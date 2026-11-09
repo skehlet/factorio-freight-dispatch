@@ -40,6 +40,7 @@ C.PRICES = {
   ["fd-express-fuel"] = 4000,
   ["car"] = 4000,
   ["small-lamp"] = 30,
+  ["fd-site-signals"] = 2000,
 }
 
 C.SHOP = {
@@ -50,6 +51,7 @@ C.SHOP = {
   { item = "locomotive", ghost = true, note = "Refuels itself automatically (you pay for fuel)." },
   { item = "cargo-wagon", ghost = true, note = "Carries cargo. Capacity depends on your wagon upgrade." },
   { item = "landfill", ghost = true, note = "Fill in water to build across lakes." },
+  { item = "fd-site-signals", ghost = true, note = "Build in a site's ring: outputs its stockpile as circuit signals. Wire it to a stop or rail signal (see Help)." },
 }
 
 -- Upgrades (Shop). Tier 1 is what you start with. Each applies to every train at once.
@@ -156,7 +158,7 @@ C.STARTERS = {
   { kind = "power-plant", x = -110, y = -210 },
 }
 
-C.TECHS = { "railway", "automated-rail-transportation", "rail-signals", "landfill", "automobilism", "lamp" }
+C.TECHS = { "railway", "automated-rail-transportation", "rail-signals", "landfill", "automobilism", "lamp", "circuit-network" }
 
 C.RANKS = {
   { at = 0, title = "Track Layer" },

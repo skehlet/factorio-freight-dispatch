@@ -69,6 +69,7 @@ Run the script as `powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\f
 - **Locomotives** auto-refuel with the current fuel tier at cost every 5 s. Idle trains burn nothing, so there's no upkeep.
 - **Cargo never lives outside wagons:** cargo in a player's inventory or cursor (checked every second), in a hand-mined wagon (taken from `on_player_mined_entity`'s buffer) or in a deconstructed wagon goes back to the nearest site that produces it.
 - **Map visibility:** each train charts a 64-tile radius around its front every 2 s, each train stop charts 48 tiles every 10 s, and the Shop sells a $5k "Land survey" (512×512 around `player.position`, which is the camera position in remote view). Charting generates chunks, which spawns new sites.
+- **Site signals** (0.3.1, Shop $2k, `fd-site-signals` = a deep-copied constant combinator): the player builds it inside a ring (auto-placing was rejected because wires reach only about 9 tiles and rings reach radius 39). `storage.signal_boxes[unit]`. Every second `update_signal_boxes` rewrites section 1 with the nearest linked site's output stock, secondary inputs, and `signal-P` (town pop) or `signal-L` (level), resetting any GUI edits. `circuit-network` is in `C.TECHS` for the wire shortcuts, and `unlock_techs()` reruns on configuration change and then re-disables every non-Shop recipe, so vanilla combinators stay unplaceable. Constant combinators, stops and rail signals need no power. Purpose (Steve wanted it): gate a mill's ore drop-off stop on Coal > 1000, so every ore unit is fully boosted.
 - **Alerts:** train wreck (`on_entity_died` filtered to rolling stock), and a train waiting at a red signal for 3 min (possible deadlock).
 - **Navigation:** Sites list rows are buttons and HUD contract lines are clickable labels. Click → `set_controller{type=remote, position, surface}`; shift-click → teleport the character.
 
@@ -101,6 +102,7 @@ Wagon records are cleaned up through `script.register_on_object_destroyed` → `
 - The simulation clamps stock with `min(cap, stock + x)`, so stock returned above the cap is trimmed on the next tick. That's acceptable.
 - The mail icon is the vanilla *blueprint* picture. The user first read a mail contract as "deliver 1500 blueprint". Contract text now includes the cargo name; a dedicated icon would be better.
 - `train_state` numbers seen in logs: 0 = on_the_path, 5 = arrive_station, 6 = wait_station, 8 = manual_control (a train in manual mode is never serviced).
+- Rail signal `close_signal` + condition: the signal is **closed while the condition is true** (`signal_state` 3 = reserved_by_circuit_network). A train stop with `circuit_enable_disable` is enabled while its condition is true. Both verified headlessly in fd-test. `is_shortcut_available` errors for vanilla shortcuts.
 
 ## Gameplay tips the user has been given (keep the Help text consistent)
 
@@ -110,7 +112,7 @@ Wagon records are cleaned up through `script.register_on_object_destroyed` → `
 
 ## Not yet verified in-game (built since the user last confirmed)
 
-Inventory-first ghost building, click-to-navigate, map reveal by trains, stops and survey, and returning cargo from inventory (the last was verified on a save copy but not live). Ask the user how these went before building on them.
+Inventory-first ghost building, click-to-navigate, map reveal by trains, stops and survey, returning cargo from inventory (verified on a save copy but not live), and Site signals wiring by hand (scripted wiring was verified). Ask the user how these went before building on them.
 
 ## Backlog (the user hasn't chosen yet; don't build unasked)
 

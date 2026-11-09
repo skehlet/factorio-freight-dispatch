@@ -56,6 +56,8 @@ script.on_nth_tick(60, function()
   local n = 0
   for _ in pairs(game.train_manager.get_trains({ surface = game.surfaces["freight"] })) do n = n + 1 end
   log("FDBAL trains=" .. n)
+  local f = game.forces.player
+  log("FDBAL circuit tech=" .. tostring(f.technologies["circuit-network"].researched) .. " decider recipe=" .. tostring(f.recipes["decider-combinator"].enabled) .. " box recipe=" .. tostring(f.recipes["fd-site-signals"].enabled) .. " rail recipe=" .. tostring(f.recipes["rail"].enabled))
 end)
 
 script.on_nth_tick(600, function()

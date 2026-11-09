@@ -124,3 +124,37 @@ for _, b in pairs(buildings) do
   end
   data:extend({ proto })
 end
+
+-- Site signals (Shop): a constant combinator the mod fills every second with the stockpile
+-- of the site whose ring it stands in. Wire it to train stops or rail signals.
+-- Constant combinators, train stops and rail signals need no power, which suits this world.
+do
+  local cc = table.deepcopy(data.raw["constant-combinator"]["constant-combinator"])
+  local icons = { { icon = "__base__/graphics/icons/constant-combinator.png", icon_size = 64, tint = { 1, 0.85, 0.45, 1 } } }
+  cc.name = "fd-site-signals"
+  cc.icon = nil
+  cc.icons = icons
+  cc.minable = { mining_time = 0.1, result = "fd-site-signals" }
+  cc.fast_replaceable_group = nil
+  cc.next_upgrade = nil
+  data:extend({
+    cc,
+    {
+      type = "item",
+      name = "fd-site-signals",
+      icons = icons,
+      subgroup = "fd-cargo",
+      order = "y",
+      place_result = "fd-site-signals",
+      stack_size = 50,
+    },
+    -- the recipe only exists so the Shop's ghosts can be placed; nobody has the ingredients
+    {
+      type = "recipe",
+      name = "fd-site-signals",
+      enabled = false,
+      ingredients = { { type = "item", name = "electronic-circuit", amount = 5 } },
+      results = { { type = "item", name = "fd-site-signals", amount = 1 } },
+    },
+  })
+end

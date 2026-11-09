@@ -620,6 +620,65 @@ served_ids = function()
   return set
 end
 
+-- Site signals boxes (constant combinators): each one reports the nearest site whose ring
+-- it stands in. Rewritten every second; anything a player edits in its GUI is reset.
+local function signals_site(box)
+  local best, bd
+  for _, s in pairs(linked_sites(box)) do
+    local d = dist(box.position.x, box.position.y, s.x, s.y)
+    if not bd or d < bd then best, bd = s, d end
+  end
+  return best
+end
+M.signals_site = signals_site
+
+local function site_signals(s)
+  local list = {}
+  local function add(type, name, v)
+    v = math.floor(v or 0)
+    if v > 0 then
+      table.insert(list, { value = { type = type, name = name, quality = type == "item" and "normal" or nil }, min = math.min(v, 2000000000) })
+    end
+  end
+  local kind = C.KINDS[s.kind]
+  for _, it in pairs(kind.produces) do add("item", it, s.stock[it]) end
+  if kind.secondary then
+    for _, it in pairs(kind.accepts) do add("item", it, s.input[it]) end
+  end
+  if s.kind == "town" then add("virtual", "signal-P", s.pop) else add("virtual", "signal-L", s.level) end
+  return list
+end
+M.site_signals = site_signals
+
+local function update_signal_box(box)
+  local s = signals_site(box)
+  local cb = box.get_or_create_control_behavior()
+  if not cb then return end
+  cb.enabled = true
+  while cb.sections_count > 1 do cb.remove_section(cb.sections_count) end
+  local sec = cb.get_section(1) or cb.add_section()
+  if sec then sec.filters = s and site_signals(s) or {} end
+end
+
+local function update_signal_boxes()
+  for unit, box in pairs(storage.signal_boxes) do
+    if box.valid then update_signal_box(box) else storage.signal_boxes[unit] = nil end
+  end
+end
+
+local function on_signals_built(box, player)
+  if not (box and box.valid) or box.surface.name ~= C.SURFACE then return end
+  storage.signal_boxes[box.unit_number] = box
+  storage.stop_links[box.unit_number] = nil
+  local s = signals_site(box)
+  if s then
+    flying_text(box.position, "Site signals: " .. site_title(s), { 0.6, 1, 0.6 }, player)
+  else
+    flying_text(box.position, "Not inside any site's ring: it will stay blank", { 1, 0.6, 0.2 }, player)
+  end
+  update_signal_box(box)
+end
+
 local function on_stop_built(stop, player)
   if not (stop and stop.valid) or stop.surface.name ~= C.SURFACE then return end
   storage.stop_links[stop.unit_number] = nil
@@ -1351,7 +1410,9 @@ local function make_surface()
   return surf
 end
 
-local function setup_force()
+-- Research C.TECHS (e.g. circuit-network unlocks the red/green wire shortcuts), then disable
+-- every recipe except the Shop items. Also run on configuration change for older saves.
+local function unlock_techs()
   local f = force()
   for _, t in pairs(C.TECHS) do
     if f.technologies[t] then f.technologies[t].researched = true end
@@ -1361,6 +1422,11 @@ local function setup_force()
   for item, _ in pairs(C.PRICES) do
     if f.recipes[item] then f.recipes[item].enabled = true end
   end
+end
+
+local function setup_force()
+  local f = force()
+  unlock_techs()
   pcall(function() f.disable_research() end)
   f.character_running_speed_modifier = 1.0
   f.manual_mining_speed_modifier = 4
@@ -1398,6 +1464,7 @@ local function init_storage()
   storage.next_contract_tick = storage.next_contract_tick or (C.CONTRACT_GAP / 2)
   storage.money = storage.money or C.START_MONEY
   storage.lifetime = storage.lifetime or 0
+  storage.signal_boxes = storage.signal_boxes or {}
   storage.earned_sec = storage.earned_sec or 0
   storage.income_hist = storage.income_hist or {}
   storage.welcomed = storage.welcomed or {}
@@ -1445,6 +1512,7 @@ end)
 script.on_configuration_changed(function()
   if storage.disabled then return end
   init_storage()
+  unlock_techs()
   if game.surfaces[C.SURFACE] then relayout_towns() end
   for _, p in pairs(game.players) do gui.build_hud(p) end
 end)
@@ -1485,12 +1553,16 @@ script.on_event(defines.events.on_built_entity, function(e)
     table.insert(storage.ghost_queue, { ghost = ent, player_index = e.player_index, tries = 0 })
   elseif ent.type == "train-stop" then
     on_stop_built(ent, game.get_player(e.player_index))
+  elseif ent.name == "fd-site-signals" then
+    on_signals_built(ent, game.get_player(e.player_index))
   end
 end)
 
 local function on_script_built(e)
   local ent = e.entity
-  if ent and ent.valid and ent.type == "train-stop" then on_stop_built(ent) end
+  if not (ent and ent.valid) then return end
+  if ent.type == "train-stop" then on_stop_built(ent)
+  elseif ent.name == "fd-site-signals" then on_signals_built(ent) end
 end
 script.on_event(defines.events.script_raised_revive, on_script_built)
 script.on_event(defines.events.script_raised_built, on_script_built)
@@ -1603,6 +1675,7 @@ end)
 
 script.on_nth_tick(60, function(e)
   simulate_second()
+  update_signal_boxes()
   for id, train in pairs(storage.waiting) do
     if train.valid and train.state == defines.train_state.wait_station then
       service_train(train)

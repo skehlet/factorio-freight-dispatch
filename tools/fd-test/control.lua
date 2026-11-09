@@ -90,6 +90,56 @@ local function build()
   end
   L("ghost", tostring(g ~= nil))
   if g then remote.call("freight_dispatch", "queue_ghost", g); storage.ghost = g end
+
+  -- Site signals: a box beside stop A (town a), wired red to the stop and to a rail signal
+  if sa then
+    local bp = surf.find_non_colliding_position("fd-site-signals", { sa.position.x + 3, sa.position.y + 3 }, 6, 0.5)
+    local box = bp and surf.create_entity({ name = "fd-site-signals", position = bp, force = "player", raise_built = true })
+    local sig
+    for _, yy in pairs({ Y + 2.5, Y - 0.5, Y + 3.5, Y - 1.5 }) do
+      for _, d in pairs({ defines.direction.east, defines.direction.west }) do
+        if not sig and surf.can_place_entity({ name = "rail-signal", position = { sa.position.x + 6.5, yy }, direction = d, force = "player" }) then
+          sig = surf.create_entity({ name = "rail-signal", position = { sa.position.x + 6.5, yy }, direction = d, force = "player" })
+        end
+      end
+    end
+    L("box", tostring(box and box.position.x), tostring(box and box.position.y), "sig", tostring(sig ~= nil))
+    if box then
+      local red = box.get_wire_connector(defines.wire_connector_id.circuit_red, true)
+      L("wire stop", tostring(red.connect_to(sa.get_wire_connector(defines.wire_connector_id.circuit_red, true))))
+      local cb = sa.get_or_create_control_behavior()
+      cb.circuit_enable_disable = true
+      cb.circuit_condition = { first_signal = { type = "item", name = "fd-passengers" }, comparator = ">", constant = 1 }
+      if sig then
+        L("wire sig", tostring(red.connect_to(sig.get_wire_connector(defines.wire_connector_id.circuit_red, true))))
+        local scb = sig.get_or_create_control_behavior()
+        scb.close_signal = true
+        scb.circuit_condition = { first_signal = { type = "item", name = "fd-passengers" }, comparator = ">", constant = 1000000000 }
+      end
+      storage.box, storage.sa, storage.sig = box, sa, sig
+    end
+  end
+end
+
+-- flip the circuit conditions and log what the stop and signal do
+local function circuit_check(tick)
+  local box, sa, sig = storage.box, storage.sa, storage.sig
+  if not (box and box.valid) then return end
+  local cb = box.get_control_behavior()
+  local sec = cb and cb.get_section(1)
+  L("box signals=" .. serpent.line(sec and sec.filters))
+  local scb = sa.get_control_behavior()
+  local sigstate = sig and sig.valid and sig.signal_state
+  L("stop cond=" .. scb.circuit_condition.constant .. " disabled=" .. tostring(scb.disabled) ..
+    " | sig close_cond=" .. (sig and sig.get_control_behavior().circuit_condition.constant or -1) ..
+    " state=" .. tostring(sigstate) .. " (open=" .. defines.signal_state.open .. " closed=" .. defines.signal_state.closed .. ")")
+  if tick == 1800 then
+    scb.circuit_condition = { first_signal = { type = "item", name = "fd-passengers" }, comparator = ">", constant = 1000000000 }
+    if sig then sig.get_control_behavior().circuit_condition = { first_signal = { type = "item", name = "fd-passengers" }, comparator = ">", constant = 1 } end
+  elseif tick == 2400 then
+    scb.circuit_condition = { first_signal = { type = "item", name = "fd-passengers" }, comparator = ">", constant = 1 }
+    if sig then sig.get_control_behavior().circuit_condition = { first_signal = { type = "item", name = "fd-passengers" }, comparator = ">", constant = 1000000000 } end
+  end
 end
 
 -- top speed tracking (tiles/tick), to verify the fuel upgrade
@@ -122,6 +172,7 @@ script.on_nth_tick(600, function(e)
     build()
     return
   end
+  if e.tick >= 1200 and e.tick <= 3000 then circuit_check(e.tick) end
   if e.tick == 6000 then upgrade_test() end
   if storage.mill and e.tick >= 6600 then
     if e.tick == 7200 then remote.call("freight_dispatch", "set_input", storage.factory, "fd-wood", 5000) end
