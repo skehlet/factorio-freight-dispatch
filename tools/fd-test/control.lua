@@ -211,6 +211,25 @@ script.on_nth_tick(600, function(e)
     return
   end
   if e.tick >= 1200 and e.tick <= 3000 then circuit_check(e.tick) end
+  -- power plant (0.4.1): a plant overlapping stop B with a nearly full fuel pile; coal and
+  -- lumber in the train. Only what fits comes off; the rest follows as the plant burns.
+  if e.tick == 3600 then
+    local pp = remote.call("freight_dispatch", "create_site", "power-plant", 352, Y - 12)
+    remote.call("freight_dispatch", "set_fuel", pp, 17990)
+    storage.pp = pp
+    local w = storage.train.cargo_wagons[1]
+    L("power: injected coal=" .. remote.call("freight_dispatch", "inject_cargo", w, "fd-coal", 1500, storage.town_a) ..
+      " wood=" .. remote.call("freight_dispatch", "inject_cargo", w, "fd-wood", 1000, storage.town_a))
+  end
+  if storage.pp and e.tick > 3600 and e.tick <= 6000 then
+    local pp = remote.call("freight_dispatch", "site", storage.pp)
+    local tb = remote.call("freight_dispatch", "site", 2 + 8) -- second harness town (after 8 starters)
+    local t = storage.train
+    L("power: fuel=" .. math.floor(pp.fuel or 0) .. " burnt=" .. math.floor(pp.burnt or 0) ..
+      " train coal=" .. t.get_item_count("fd-coal") .. " wood=" .. t.get_item_count("fd-wood") ..
+      " at=" .. tostring(t.station and t.station.backer_name) .. " townB powered_by=" .. tostring(tb and tb.powered_by) ..
+      " | " .. tostring(remote.call("freight_dispatch", "site_detail", storage.pp)))
+  end
   if e.tick == 6000 then upgrade_test() end
   -- back-pressure: a factory overlapping stop B with a nearly full steel pile; 3,000 steel in the train
   if e.tick == 6000 then

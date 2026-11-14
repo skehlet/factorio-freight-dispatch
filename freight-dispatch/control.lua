@@ -66,9 +66,16 @@ local function flying_text(position, text, color, player)
   end
 end
 
+-- Power (0.4.1): x1.25 for a site inside a running power plant's supply radius, else 1
+local function power_mult(site)
+  return site.powered_by and (1 + C.POWER.bonus) or 1
+end
+M.power_mult = power_mult
+
 -- Goods a town needs per new resident; rises with population so big cities take many goods.
+-- A powered town grows 25% more per good.
 function M.goods_per_resident(site)
-  return C.GOODS_PER_RESIDENT * math.max(1, site.pop / 1000)
+  return C.GOODS_PER_RESIDENT * math.max(1, site.pop / 1000) / power_mult(site)
 end
 
 -- Train liveries (0.3.5): the mod paints each carriage once and remembers it in
@@ -210,13 +217,6 @@ local function clear_area(surf, area)
     if e.valid then e.destroy() end
   end
   surf.destroy_decoratives({ area = area })
-end
-
-local function far_enough(x, y, min_d)
-  for _, s in pairs(storage.sites) do
-    if dist(x, y, s.x, s.y) < min_d then return false end
-  end
-  return true
 end
 
 ---------------------------------------------------------------------------
@@ -396,6 +396,19 @@ local function cargo_list_str(items)
   return table.concat(parts, " ")
 end
 
+local function supply_radius(site)
+  return C.POWER.radius + C.POWER.radius_per_level * (site.level - 1)
+end
+M.supply_radius = supply_radius
+
+local function plant_running(site)
+  return (site.fuel or 0) > 0
+end
+
+local function fuel_minutes(site)
+  return (site.fuel or 0) / C.POWER.burn / 60
+end
+
 function M.site_status(site)
   local kind = C.KINDS[site.kind]
   local parts = {}
@@ -412,6 +425,10 @@ function M.site_status(site)
       table.insert(waiting, "[item=" .. it .. "] " .. fmt(math.floor(site.stock[it] or 0)))
     end
     table.insert(parts, "Waiting for pickup: " .. table.concat(waiting, ", "))
+  end
+  if site.kind == "power-plant" then
+    table.insert(parts, plant_running(site) and string.format("Fuel: %d min", math.ceil(fuel_minutes(site)))
+      or "[color=#ff9070]Out of fuel[/color]")
   end
   if #kind.accepts > 0 then
     table.insert(parts, "Wants: " .. cargo_list_str(kind.accepts))
@@ -430,28 +447,65 @@ local function level_note(site)
     local mult = 1 + C.LEVEL_BONUS * (site.level - 1)
     local service = 0.6 + 0.4 * site.rating
     local s = string.format("Level %d: output x%d. ", site.level, mult)
+    service = service * power_mult(site)
     if (site.stock[item] or 0) >= C.STOCK_CAP * site.level - 1 then
       s = s .. "Stockpile full (" .. fmt(C.STOCK_CAP * site.level) .. "): production waits for a pickup"
     else
       s = s .. string.format("Making %.1f [item=%s]/s", base * mult * service, item)
-      if service < 0.99 then
-        s = s .. string.format(" (x%.2f until trains pick up every minute)", service)
+      local svc = 0.6 + 0.4 * site.rating
+      if svc < 0.99 then
+        s = s .. string.format(" (x%.2f until trains pick up every minute)", svc)
       end
     end
     return s .. ". " .. nxt
   elseif kind.main then
-    return string.format("Level %d: processes up to %d [item=%s]/s. ", site.level, C.PROCESS_RATE * site.level, kind.main) .. nxt
+    return string.format("Level %d: processes up to %s [item=%s]/s. ", site.level,
+      fmt(C.PROCESS_RATE * site.level * power_mult(site)), kind.main) .. nxt
   end
 end
 
 -- Second status line: what drives this site (town growth by source, industry boost, level).
 local site_detail_core
+local function plant_detail(site)
+  local r = fmt(supply_radius(site))
+  local s
+  if plant_running(site) then
+    s = string.format("Running: %d min of fuel. Powering %d site%s within %s tiles (+%d%%). ",
+      math.ceil(fuel_minutes(site)), site.powering or 0, site.powering == 1 and "" or "s", r, C.POWER.bonus * 100)
+  else
+    s = "Out of fuel. Deliver [item=fd-coal] Coal or [item=fd-wood] Lumber to power sites within " .. r ..
+      " tiles (+" .. (C.POWER.bonus * 100) .. "%). "
+  end
+  s = s .. "Burns " .. C.POWER.burn .. " [item=fd-coal]/s (lumber counts half), holds " ..
+    fmt(C.POWER.cap / C.POWER.burn / 60) .. " min. "
+  local need = C.LEVEL_AT[site.level]
+  s = s .. "Level " .. site.level .. ": supply radius " .. r .. ". "
+  if need then
+    s = s .. "Next level at " .. fmt(need) .. " fuel burnt (" .. fmt(site.burnt or 0) .. " so far)."
+  else
+    s = s .. "Top level."
+  end
+  return s
+end
+
+local function powered_note(site)
+  local p = site.powered_by and storage.sites[site.powered_by]
+  if not p then return nil end
+  return "Powered by " .. site_title(p) .. ": +" .. (C.POWER.bonus * 100) .. "%."
+end
+
 function M.site_detail(site)
+  if site.kind == "power-plant" then return plant_detail(site) end
   local core = site_detail_core(site)
-  if site.kind == "town" then return core end
-  local lvl = #C.KINDS[site.kind].produces > 0 and level_note(site) or nil
-  if core and lvl then return core .. (core:sub(-1) == "." and " " or ". ") .. lvl end
-  return core or lvl
+  local pw = powered_note(site)
+  local lvl = site.kind ~= "town" and #C.KINDS[site.kind].produces > 0 and level_note(site) or nil
+  local out
+  for _, part in pairs({ core, lvl, pw }) do
+    if part then
+      if out then out = out .. (out:sub(-1) == "." and " " or ". ") .. part else out = part end
+    end
+  end
+  return out
 end
 
 site_detail_core = function(site)
@@ -525,7 +579,29 @@ local function draw_site(site)
   draw_detail(site)
 end
 
+-- Power plant supply area: a faint circle on the ground and on the map, dimmed when dry
+local function update_supply_circle(site)
+  if site.kind ~= "power-plant" or not site.render then return end
+  local on = plant_running(site)
+  local a = on and 0.45 or 0.12
+  local col = { 0.9 * a, 0.5 * a, 0.9 * a, a }
+  for _, key in pairs({ "supply", "supply_map" }) do
+    local o = site.render[key]
+    if not (o and o.valid) then
+      o = rendering.draw_circle({
+        color = col, radius = supply_radius(site), width = key == "supply" and 4 or 2, filled = false,
+        target = { site.x, site.y }, surface = surface(), draw_on_ground = true,
+        render_mode = key == "supply" and "game" or "chart",
+      })
+      site.render[key] = o
+    end
+    o.radius = supply_radius(site)
+    o.color = col
+  end
+end
+
 local function update_site_render(site)
+  update_supply_circle(site)
   if site.render and site.render.status and site.render.status.valid then
     site.render.status.text = M.site_status(site)
     local d = site.render.detail
@@ -574,38 +650,44 @@ local function create_site(kind, x, y, opts)
   storage.stop_links = {}
   build_site_structures(surf, site)
   draw_site(site)
+  update_supply_circle(site)
   force().chart(surf, box(x, y, 24))
   tag_site(site)
   return site
 end
 M.create_site = create_site
 
-local function pick_kind(d)
-  local weights = {}
-  local total = 0
-  for kind, w in pairs(C.KIND_WEIGHTS) do
-    local kw = w
-    if (kind == "steel-mill" or kind == "factory") and d < 200 then kw = kw * 0.4 end
-    weights[kind] = kw
-    total = total + kw
+-- Spacing rules: SITE_MIN_DIST from any site, TOWN_MIN_DIST between towns.
+local function spot_ok(kind, x, y, min_d)
+  min_d = min_d or C.SITE_MIN_DIST
+  for _, s in pairs(storage.sites) do
+    local d = dist(x, y, s.x, s.y)
+    if d < min_d then return false end
+    if kind == "town" and s.kind == "town" and d < C.TOWN_MIN_DIST then return false end
   end
-  local r = rand() * total
-  -- iterate in fixed order for determinism
-  for _, kind in pairs(C.KIND_ORDER) do
-    r = r - (weights[kind] or 0)
-    if r <= 0 then return kind end
-  end
-  return "town"
+  return true
 end
 
-local function find_land_near(tx, ty, max_r)
+-- the site's whole footprint (3x3 chunks around it) must exist before we build there, so a
+-- later chunk generation can never overwrite it
+local function area_generated(surf, x, y)
+  local cx, cy = math.floor(x / 32), math.floor(y / 32)
+  for dx = -1, 1 do
+    for dy = -1, 1 do
+      if not surf.is_chunk_generated({ cx + dx, cy + dy }) then return false end
+    end
+  end
+  return true
+end
+
+local function find_land_near(kind, tx, ty, max_r, min_d)
   local surf = surface()
   for r = 0, max_r, 8 do
     local steps = math.max(1, math.floor(r / 4))
     for i = 0, steps - 1 do
       local a = (i / steps) * 2 * math.pi
       local x, y = math.floor(tx + math.cos(a) * r), math.floor(ty + math.sin(a) * r)
-      if land_ok(surf, x, y, 13) and far_enough(x, y, 70) then
+      if area_generated(surf, x, y) and land_ok(surf, x, y, 13) and spot_ok(kind, x, y, min_d) then
         return x, y
       end
     end
@@ -614,8 +696,13 @@ local function find_land_near(tx, ty, max_r)
 end
 
 local function place_starters()
+  -- rotate the whole layout by a random angle, so every map starts differently
+  local a = rand() * 2 * math.pi
+  local ca, sa = math.cos(a), math.sin(a)
   for _, st in pairs(C.STARTERS) do
-    local x, y = find_land_near(st.x, st.y, 140)
+    local tx, ty = st.x * ca - st.y * sa, st.x * sa + st.y * ca
+    local x, y = find_land_near(st.kind, tx, ty, 160)
+    if not x then x, y = find_land_near(st.kind, tx, ty, 160, 100) end -- lots of water: relax
     if x then
       create_site(st.kind, x, y, { pop = st.pop })
     end
@@ -635,22 +722,115 @@ local function room_for_site()
 end
 M.room_for_site = room_for_site
 
-local function process_chunk_queue()
-  local q = storage.chunk_queue
-  local n = 0
-  while #q > 0 and n < 10 do
-    local c = table.remove(q)
-    n = n + 1
-    if rand() < C.SITE_CHANCE and room_for_site() then
-      local x = c.x * 32 + 16 + rand_int(-3, 3)
-      local y = c.y * 32 + 16 + rand_int(-3, 3)
-      local d = dist(x, y, 0, 0)
-      local surf = surface()
-      if far_enough(x, y, C.SITE_MIN_DIST) and land_ok(surf, x, y, 12) then
-        create_site(pick_kind(d), x, y)
+-- What to found next: a kind missing from the whole map if there is one, otherwise a weighted
+-- pick that avoids kinds already waiting unserved (so the spare sites stay varied).
+local function pick_found_kind(served)
+  local all, spare = {}, {}
+  for id, s in pairs(storage.sites) do
+    all[s.kind] = (all[s.kind] or 0) + 1
+    if not served[id] then spare[s.kind] = (spare[s.kind] or 0) + 1 end
+  end
+  local weights, total = {}, 0
+  local missing = false
+  for _, kind in pairs(C.KIND_ORDER) do
+    if not all[kind] then missing = true end
+  end
+  for _, kind in pairs(C.KIND_ORDER) do
+    local w
+    if missing then
+      w = all[kind] and 0 or C.KIND_WEIGHTS[kind]
+    else
+      local n = spare[kind] or 0
+      w = C.KIND_WEIGHTS[kind] / ((1 + n) * (1 + n))
+    end
+    weights[kind] = w
+    total = total + w
+  end
+  local r = rand() * total
+  for _, kind in pairs(C.KIND_ORDER) do
+    r = r - weights[kind]
+    if r <= 0 and weights[kind] > 0 then return kind end
+  end
+  return "town"
+end
+
+-- Found one new site on purpose: FOUND_MIN..FOUND_MAX tiles from a random served site (or
+-- spawn), on generated dry land that keeps the spacing rules. Land that isn't generated yet
+-- is requested and tried again on a later call.
+local function found_site()
+  local surf = surface()
+  local served = served_ids()
+  local anchors = {}
+  for id in pairs(served) do
+    local s = storage.sites[id]
+    if s then table.insert(anchors, s) end
+  end
+  table.sort(anchors, function(p, q) return p.id < q.id end) -- pairs order isn't stable
+  if #anchors == 0 then anchors = { { x = 0, y = 0 } } end
+  local kind = storage.found_kind or pick_found_kind(served)
+  storage.found_kind = kind
+  -- a power plant goes where it would cover the most sites no plant covers yet (fuelled or
+  -- not; your served ones count double), so there's usually a good one to connect. Anything
+  -- else takes the first good spot.
+  local plants = {}
+  for _, s in pairs(storage.sites) do
+    if s.kind == "power-plant" then table.insert(plants, s) end
+  end
+  local function covered(s)
+    for _, p in pairs(plants) do
+      if dist(s.x, s.y, p.x, p.y) <= supply_radius(p) then return true end
+    end
+    return false
+  end
+  local function score(x, y)
+    local n = 0
+    for id, s in pairs(storage.sites) do
+      if s.kind ~= "power-plant" and dist(x, y, s.x, s.y) <= C.POWER.radius and not covered(s) then
+        n = n + (served[id] and 2 or 1)
+      end
+    end
+    return n
+  end
+  local bx, by, bs
+  for _ = 1, 40 do
+    local an = pick(anchors)
+    local a = rand() * 2 * math.pi
+    local d = C.FOUND_MIN + rand() * (C.FOUND_MAX - C.FOUND_MIN)
+    local x, y = math.floor(an.x + math.cos(a) * d), math.floor(an.y + math.sin(a) * d)
+    if spot_ok(kind, x, y) then
+      if not area_generated(surf, x, y) then
+        surf.request_to_generate_chunks({ x, y }, 1)
+      elseif land_ok(surf, x, y, 13) then
+        local sc = kind == "power-plant" and score(x, y) or 0
+        if not bs or sc > bs then bx, by, bs = x, y, sc end
+        if kind ~= "power-plant" then break end
       end
     end
   end
+  if not bx then return nil end
+  local x, y = bx, by
+  storage.found_kind = nil
+  local site = create_site(kind, x, y)
+  local near, nd = nil, nil
+  for id in pairs(served) do
+    local s = storage.sites[id]
+    if s then
+      local dd = dist(x, y, s.x, s.y)
+      if not nd or dd < nd then near, nd = s, dd end
+    end
+  end
+  game.print("[color=cyan]A new " .. C.KINDS[kind].label:lower() .. " has been founded:[/color] " ..
+    "[item=" .. site_icon(site) .. "] " .. site_title(site) ..
+    (near and (", " .. M.fmt(nd) .. " tiles from " .. site_title(near)) or "") ..
+    " [gps=" .. x .. "," .. y .. "," .. C.SURFACE .. "]")
+  return site
+end
+M.found_site = found_site
+
+local function maybe_found_site()
+  if game.tick < (storage.next_found_tick or 0) then return end
+  if not room_for_site() then return end
+  if found_site() then storage.next_found_tick = game.tick + C.FOUND_GAP end
 end
 
 ---------------------------------------------------------------------------
@@ -718,6 +898,7 @@ local function site_signals(s)
     for _, it in pairs(kind.accepts) do add("item", it, s.input[it]) end
   end
   if s.kind == "town" then add("virtual", "signal-P", s.pop) else add("virtual", "signal-L", s.level) end
+  if s.kind == "power-plant" then add("virtual", "signal-F", s.fuel) end
   return list
 end
 M.site_signals = site_signals
@@ -817,6 +998,8 @@ local function on_delivered(site, item, amount)
   local kind = C.KINDS[site.kind]
   if kind.secondary then
     site.input[item] = math.min(C.INPUT_CAP, (site.input[item] or 0) + amount)
+  elseif site.kind == "power-plant" then
+    site.fuel = math.min(C.POWER.cap, (site.fuel or 0) + amount * (C.POWER.fuel[item] or 0))
   end
   site.recv = site.recv or {}
   site.recv[item] = (site.recv[item] or 0) + amount
@@ -826,10 +1009,14 @@ local function on_delivered(site, item, amount)
     site.grow_acc = site.grow_acc or {}
     site.grow_acc[item] = (site.grow_acc[item] or 0) + gain
   end
-  -- contracts
-  for _, ct in pairs(storage.contracts) do
-    if ct.site_id == site.id and ct.item == item and not ct.done then
-      ct.delivered = ct.delivered + amount
+  -- contracts: each unit counts once, oldest matching contract first, and only what it still
+  -- needs (before 0.4.2 the full amount counted towards every matching contract)
+  local left = amount
+  for _, ct in ipairs(storage.contracts) do
+    if left > 0 and ct.site_id == site.id and ct.item == item and not ct.done then
+      local take = math.min(left, ct.amount - ct.delivered)
+      ct.delivered = ct.delivered + take
+      left = left - take
       if ct.delivered >= ct.amount then
         ct.done = true
         earn(ct.reward)
@@ -896,10 +1083,12 @@ local function service_train(train)
             local avail = have - untracked
             -- back-pressure (0.3.4): steel mills and factories only take what fits in their
             -- input pile; the rest stays aboard and comes off on later seconds as room opens.
-            -- Towns and power plants have no pile and take everything.
+            -- Power plants (0.4.1) take what fits in their fuel pile. Towns take everything.
             local room = math.huge
             if C.KINDS[site.kind].secondary then
               room = math.max(0, math.floor(C.INPUT_CAP - (site.input[item] or 0)))
+            elseif site.kind == "power-plant" then
+              room = math.max(0, math.floor((C.POWER.cap - (site.fuel or 0)) / C.POWER.fuel[item] + 0.001))
             end
             for _, lot in ipairs(lots) do
               if dist(lot.ox, lot.oy, site.x, site.y) >= C.MIN_DIST and avail > 0 and room > 0 then
@@ -1002,19 +1191,52 @@ end
 ---------------------------------------------------------------------------
 
 local function level_up_check(site)
-  if site.kind == "town" or site.kind == "power-plant" then return end
+  if site.kind == "town" then return end
+  local plant = site.kind == "power-plant"
   local need = C.LEVEL_AT[site.level]
-  if need and site.shipped >= need then
+  if need and (plant and (site.burnt or 0) or site.shipped) >= need then
     site.level = site.level + 1
     game.print("[color=yellow]" .. site_title(site) .. " expanded to level " .. site.level ..
-      "![/color] Production up. [gps=" .. site.x .. "," .. site.y .. "," .. C.SURFACE .. "]")
+      "![/color] " .. (plant and ("Supply radius now " .. fmt(supply_radius(site)) .. " tiles.") or "Production up.") ..
+      " [gps=" .. site.x .. "," .. site.y .. "," .. C.SURFACE .. "]")
+    if plant then update_supply_circle(site) end
+  end
+end
+
+-- Burn fuel, then give every other site the nearest running plant whose radius reaches it
+-- (one plant at most: overlapping plants don't stack).
+local function update_power()
+  local running = {}
+  for _, site in pairs(storage.sites) do
+    if site.kind == "power-plant" then
+      local was = plant_running(site)
+      local b = math.min(site.fuel or 0, C.POWER.burn)
+      site.fuel = (site.fuel or 0) - b
+      if site.fuel < 0.001 then site.fuel = 0 end
+      site.burnt = (site.burnt or 0) + b
+      site.powering = 0
+      if plant_running(site) then table.insert(running, site) end
+      if was ~= plant_running(site) then update_supply_circle(site) end
+    end
+  end
+  for _, site in pairs(storage.sites) do
+    if site.kind ~= "power-plant" then
+      local best, bd
+      for _, p in ipairs(running) do
+        local d = dist(site.x, site.y, p.x, p.y)
+        if d <= supply_radius(p) and (not bd or d < bd) then best, bd = p, d end
+      end
+      site.powered_by = best and best.id or nil
+      if best then best.powering = best.powering + 1 end
+    end
   end
 end
 
 local function simulate_second()
+  update_power()
   for _, site in pairs(storage.sites) do
     local kind = C.KINDS[site.kind]
-    local service = 0.6 + 0.4 * site.rating
+    local service = (0.6 + 0.4 * site.rating) * power_mult(site)
     local cap = C.STOCK_CAP * site.level
     if site.kind == "town" then
       local pax = site.pop / 60 * service
@@ -1031,7 +1253,7 @@ local function simulate_second()
       -- steel mill (ore, boosted by coal) and factory (steel, boosted by lumber):
       -- the booster alone makes nothing; it raises the yield of the main input.
       local main = site.input[kind.main] or 0
-      local p = math.min(main, C.PROCESS_RATE * site.level)
+      local p = math.min(main, C.PROCESS_RATE * site.level * power_mult(site))
       local item = kind.produces[1]
       local room = cap - (site.stock[item] or 0)
       site.output_full = p > 0 and room < 1
@@ -1375,12 +1597,17 @@ local function new_contract()
       for _, it in pairs(C.KINDS[s.kind].produces) do makes[it] = true end
     end
   end
+  -- never two contracts for the same cargo to the same site
+  local active = {}
+  for _, ct in pairs(storage.contracts) do
+    if not ct.done then active[ct.site_id .. "/" .. ct.item] = true end
+  end
   local candidates = {}
   for id in pairs(served) do
     local s = storage.sites[id]
     if s then
       for _, item in pairs(C.KINDS[s.kind].accepts) do
-        if makes[item] then
+        if makes[item] and not active[id .. "/" .. item] then
           local w = (s.recv and (s.recv[item] or 0) > 0) and 4 or 1
           if not C.TOWN_CARGO[item] then w = w * 3 end -- freight contracts are more common
           table.insert(candidates, { site = s, item = item, w = w })
@@ -1391,7 +1618,7 @@ local function new_contract()
   if #candidates == 0 then
     for _, s in pairs(storage.sites) do
       for _, item in pairs(C.KINDS[s.kind].accepts) do
-        if producers_exist(item) then
+        if producers_exist(item) and not active[s.id .. "/" .. item] then
           table.insert(candidates, { site = s, item = item, w = 1 })
         end
       end
@@ -1548,7 +1775,7 @@ local function init_storage()
   storage.waiting = storage.waiting or {}
   storage.stuck = storage.stuck or {}
   storage.ghost_queue = storage.ghost_queue or {}
-  storage.chunk_queue = storage.chunk_queue or {}
+  storage.chunk_queue = nil -- before 0.4.0, sites were rolled per generated chunk
   storage.contracts = storage.contracts or {}
   storage.next_contract_tick = storage.next_contract_tick or (C.CONTRACT_GAP / 2)
   storage.money = storage.money or C.START_MONEY
@@ -1589,7 +1816,7 @@ script.on_init(function()
   end
   local surf = make_surface()
   storage.seed = (surf.map_gen_settings.seed % 2147483647) + 1
-  surf.request_to_generate_chunks({ 0, 0 }, 9)
+  surf.request_to_generate_chunks({ 0, 0 }, 18) -- starters reach about 400 tiles out
   surf.force_generate_chunk_requests()
   place_starters()
   pcall(function() game.map_settings.pollution.enabled = false end)
@@ -1631,12 +1858,6 @@ end)
 script.on_event(defines.events.on_player_respawned, function(e)
   local p = game.get_player(e.player_index)
   if p and p.surface.name ~= C.SURFACE then setup_player(p) end
-end)
-
-script.on_event(defines.events.on_chunk_generated, function(e)
-  if e.surface.name == C.SURFACE then
-    table.insert(storage.chunk_queue, { x = e.position.x, y = e.position.y })
-  end
 end)
 
 script.on_event(defines.events.on_chunk_charted, function(e)
@@ -1775,8 +1996,8 @@ script.on_nth_tick(10, function()
   process_ghosts()
 end)
 
-script.on_nth_tick(31, function()
-  if #storage.chunk_queue > 0 then process_chunk_queue() end
+script.on_nth_tick(120, function()
+  maybe_found_site()
 end)
 
 script.on_nth_tick(60, function(e)
@@ -1834,6 +2055,7 @@ remote.add_interface("freight_dispatch", {
   site_detail = function(id) return storage.sites[id] and M.site_detail(storage.sites[id]) end,
   set_input = function(id, item, amount) storage.sites[id].input[item] = amount end,
   get_input = function(id, item) return storage.sites[id].input[item] end,
+  set_fuel = function(id, amount) storage.sites[id].fuel = amount end,
   -- test hook: every train's carriage colours, as "r,g,b" strings
   train_colors = function()
     local out = {}
@@ -1910,6 +2132,7 @@ remote.add_interface("freight_dispatch", {
     log("FDDUMP contracts " .. serpent.line(storage.contracts))
     log("FDDUMP wagons-table-size " .. table_size(storage.wagons))
   end,
+  contracts = function() return storage.contracts end,
   stats = function()
     return { money = storage.money, lifetime = storage.lifetime, sites = table_size(storage.sites),
       contracts = #storage.contracts, deliveries = storage.deliveries or 0, fuel_spent = storage.fuel_spent or 0 }

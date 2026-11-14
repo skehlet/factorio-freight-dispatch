@@ -22,10 +22,12 @@ You run a railway company. You don't build a factory here. Towns and industries 
 
 [font=default-bold]5. Upgrade.[/font] The Shop sells upgrades that apply to every train at once: better fuel (faster acceleration and top speed), bigger cargo wagons, and station crews that load faster. Running shoes make you run faster.
 
-New towns and industries stop appearing once you have plenty of unserved ones, and contracts stick to places your network already serves.
+You start with a full goods chain spread around spawn. Whenever fewer than 6 sites are left unserved, a new one is founded 200 to 500 tiles from your network, usually a kind the map is short of, and announced in chat (click its map link). Towns stay at least 300 tiles apart. Contracts stick to places your network already serves.
 
 [font=default-bold]Supply chains[/font]
 [item=fd-coal] Coal Mine -> Power Plant or Steel Mill
+[item=fd-wood] Lumber Camp -> Power Plant (counts as half a coal) or Factory
+Power plants burn 15 coal a second and hold 20 minutes of fuel. While a plant has fuel, every site within its supply circle (250 tiles, a little more each level) is powered: towns make 25% more passengers and mail and grow 25% more per good, mines and lumber camps make 25% more, and steel mills and factories process 25% more. A site is powered by one plant at most, so build plants near different clusters rather than many in one place. Running dry only switches the bonus off.
 [item=fd-iron-ore] Iron Mine -> Steel Mill. Coal is a booster: steel output goes up to x2 with half a coal per ore. Coal alone makes nothing.
 [item=fd-steel] Steel Mill -> Factory. [item=fd-wood] Lumber is a booster: goods output goes up to x2 with half a lumber per steel. Lumber alone makes nothing.
 [item=fd-goods] Factory -> Towns (the only way towns grow)
@@ -34,7 +36,7 @@ Steel mills and factories hold up to 20,000 of each input. When a pile is full, 
 
 [font=default-bold]Building[/font]
 - In the Shop, [color=yellow]Place[/color] puts a ghost in your cursor. Any ghost you place (including blueprints, and from map view with M) is built instantly. Matching items in your inventory are used first, and the rest is paid in cash, so you never need to buy rails ahead of time. Trees in the way are cleared for a small fee. A floating note shows what each build cost.
-- Map: your trains reveal the land around them as they run, and your train stops keep a live view of their area. To scout somewhere new, open the map (M), look at the area, and buy a Land survey from the Shop.
+- Map: your trains reveal the land around them as they run, and your train stops keep a live view of their area. To scout somewhere new (for example the route to a new site), open the map (M), look at the area, and buy a Land survey from the Shop.
 - In the Sites list (and on contracts in the left panel), click a name to jump the map view there. Shift+click to travel there in person.
 - Rail costs: straight $50, diagonal $100, curve $150. Ghosts you can't afford yet wait and build as soon as the money comes in.
 - The deconstruction planner removes your rails and signals instantly and refunds 75% of the price.
@@ -46,7 +48,7 @@ Rail signal: one train per block. Place it where a train should wait.
 Chain signal: looks ahead to the next signal. Put chain signals at junction entries and inside junctions, and a rail signal at each exit, so trains never stop in the middle of a junction.
 
 [font=default-bold]Circuits (optional): Site signals[/font]
-Buy [item=fd-site-signals] Site signals in the Shop and build it inside a site's ring, close to your stop or signal (wires reach about 9 tiles). Every second it outputs that site's stockpile: a steel mill shows its [item=fd-iron-ore] ore, [item=fd-coal] coal and [item=fd-steel] steel, a town its waiting [item=fd-passengers] passengers and [item=fd-mail] mail. It also outputs [virtual-signal=signal-P] population (towns) or [virtual-signal=signal-L] level (industries). No power is needed.
+Buy [item=fd-site-signals] Site signals in the Shop and build it inside a site's ring, close to your stop or signal (wires reach about 9 tiles). Every second it outputs that site's stockpile: a steel mill shows its [item=fd-iron-ore] ore, [item=fd-coal] coal and [item=fd-steel] steel, a town its waiting [item=fd-passengers] passengers and [item=fd-mail] mail. It also outputs [virtual-signal=signal-P] population (towns) or [virtual-signal=signal-L] level (industries), and a power plant its fuel pile as [virtual-signal=signal-F]. No power is needed.
 To wire it: click the red or green wire button in the shortcut bar (bottom right), click the box, then click the train stop or rail signal. Then open the stop or signal and tick its circuit option. When you pick the signal for a condition, choose the freight version, which has a small locomotive badge (for example "Lumber (freight)", not vanilla "Wood"). They look alike, but only the freight one carries the site's numbers.
 - Keep a mill at full boost: wire the box to the mill's ore drop-off stop and choose "Enable/disable" with [item=fd-coal] Coal > 1000. Ore only arrives while there is coal to boost it, and the mill eats ore within seconds, so every unit gets the full x2. Do the same at a factory's steel stop with [item=fd-wood] Lumber > 1000.
 - A disabled stop is skipped, so the train goes on to its next stop. To hold the train instead, wire a rail signal before the stop (on a siding off the main line) and set it to close when Coal < 1000.
@@ -200,7 +202,7 @@ local function build_shop(player)
   inner.add({
     type = "button", caption = "[item=train-stop] Land survey here (" .. M.money_str(C.SURVEY_PRICE) .. ")", tags = { fd = "survey" },
     tooltip = "Reveals a " .. (C.SURVEY_RADIUS * 2) .. " x " .. (C.SURVEY_RADIUS * 2) ..
-      " tile area around where you're looking (works from the map view too). Unexplored land fills with new towns and industries.",
+      " tile area around where you're looking (works from the map view too). Handy for planning a route.",
   })
 end
 
@@ -236,7 +238,7 @@ local function build_sites(player)
     st.style.single_line = false
     t.add({ type = "label", caption = M.fmt(e.d) .. " tiles" })
   end
-  f.add({ type = "label", caption = "[color=gray]Explore (or view the map) to discover more sites. New land generates new towns and industries.[/color]" })
+  f.add({ type = "label", caption = "[color=gray]A new site is founded near your network whenever fewer than " .. C.SPARE_SITES_MIN .. " are left unserved.[/color]" })
 end
 
 local function build_help(player)

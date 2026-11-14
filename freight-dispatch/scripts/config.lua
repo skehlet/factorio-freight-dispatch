@@ -11,12 +11,18 @@ C.WAGON_RATE = 400         -- units loaded/unloaded per wagon per second
 C.MIN_DIST = 60            -- cargo must travel at least this far to be paid
 C.STOCK_CAP = 4000         -- per level, for industries
 C.INPUT_CAP = 20000
-C.SITE_CHANCE = 0.10       -- chance a newly generated chunk gets a site
-C.SITE_MIN_DIST = 100
--- Clutter cap: new sites only appear while unserved sites (no train stop in their ring)
--- number fewer than max(SPARE_SITES_MIN, served sites x SPARE_SITES_RATIO).
+-- Site spacing (0.4.0; was 100 for everything, which packed the map at ~115 tiles apart)
+C.SITE_MIN_DIST = 180      -- any two sites
+C.TOWN_MIN_DIST = 300      -- any two towns
+-- Founding (0.4.0): new sites are no longer rolled per generated chunk. Whenever unserved
+-- sites (no train stop in their ring) number fewer than max(SPARE_SITES_MIN, served x
+-- SPARE_SITES_RATIO), one new site is founded on purpose: a kind the map is short of,
+-- FOUND_MIN..FOUND_MAX tiles from one of your served sites, at most once per FOUND_GAP.
 C.SPARE_SITES_MIN = 6
 C.SPARE_SITES_RATIO = 0.5
+C.FOUND_MIN = 200
+C.FOUND_MAX = 500
+C.FOUND_GAP = 30 * 60
 C.STUCK_TICKS = 3 * 60 * 60
 C.TRAIN_SIGHT = 64         -- tiles revealed around each train (refreshed every 2 s)
 C.STOP_SIGHT = 48          -- tiles kept live around each train stop (every 10 s)
@@ -140,24 +146,42 @@ C.KINDS = {
   },
   ["power-plant"] = {
     label = "Power Plant", icon = "fd-coal", radius = 18, color = { 1, 0.6, 1 },
-    produces = {}, accepts = { "fd-coal" },
+    produces = {}, accepts = { "fd-coal", "fd-wood" },
   },
 }
 
 C.KIND_ORDER = { "town", "coal-mine", "iron-mine", "forest", "steel-mill", "factory", "power-plant" }
 C.KIND_WEIGHTS = {
-  ["town"] = 32, ["coal-mine"] = 14, ["iron-mine"] = 14, ["forest"] = 11,
+  ["town"] = 18, ["coal-mine"] = 14, ["iron-mine"] = 14, ["forest"] = 11,
   ["steel-mill"] = 10, ["factory"] = 10, ["power-plant"] = 9,
+}
+
+-- Power plants (0.4.1): burn delivered fuel and power every other site within their supply
+-- radius while the fuel pile isn't empty. A site takes the bonus from one plant at most.
+C.POWER = {
+  fuel = { ["fd-coal"] = 1, ["fd-wood"] = 0.5 }, -- fuel value per unit (lumber counts half)
+  burn = 15,             -- fuel burnt per second while running
+  cap = 18000,           -- fuel pile: 20 minutes of running
+  radius = 250,          -- supply radius at level 1
+  radius_per_level = 25, -- level 5: 350 tiles. Plants level up from fuel burnt (LEVEL_AT).
+  bonus = 0.25,          -- powered towns: +25% passengers and mail, and 25% more growth per good;
+                         -- primary industries +25% output; mills and factories +25% processing
 }
 
 -- shipped units needed to reach the next industry level
 C.LEVEL_AT = { 20000, 60000, 150000, 350000 }
 
+-- Starting sites: a full goods chain around spawn. The whole layout is rotated by a random
+-- angle per map, and each site moves to the nearest dry spot that keeps the spacing rules.
 C.STARTERS = {
   { kind = "town", x = 40, y = -30, pop = 700 },
-  { kind = "town", x = -230, y = 70, pop = 550 },
+  { kind = "town", x = -290, y = 90, pop = 550 },
   { kind = "coal-mine", x = 190, y = 170 },
   { kind = "power-plant", x = -110, y = -210 },
+  { kind = "iron-mine", x = 270, y = -160 },
+  { kind = "steel-mill", x = 390, y = 60 },
+  { kind = "forest", x = -340, y = -170 },
+  { kind = "factory", x = -60, y = 290 },
 }
 
 C.TECHS = { "railway", "automated-rail-transportation", "rail-signals", "landfill", "automobilism", "lamp", "circuit-network" }
