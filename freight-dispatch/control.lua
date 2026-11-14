@@ -409,140 +409,136 @@ local function fuel_minutes(site)
   return (site.fuel or 0) / C.POWER.burn / 60
 end
 
+-- Site text (0.4.3): every site uses the same two lines.
+--   status: inventory only. Level or population, then In (piles with limits), Out, Accepts.
+--   detail: what it's doing. One state, its rate, the multipliers in the same "x" format and
+--           order (level, boost, power, service), then progress to the next level.
+-- Teaching sentences (what a booster is, lumber counts half...) live in the Help, not here.
+local SEP = "  ·  "
+
+local function icon(item)
+  return "[item=" .. item .. "]"
+end
+
+local function pile(n, cap)
+  n = math.floor(n or 0)
+  local s = fmt(n) .. " / " .. fmt(cap)
+  if n >= cap - 1 then s = s .. " (full)" end
+  return s
+end
+
+local function next_level(site, done)
+  local need = C.LEVEL_AT[site.level]
+  if not need then return "Top level" end
+  return "Next level " .. math.min(99, math.floor((done or 0) / need * 100)) .. "%"
+end
+
+local function mults(list)
+  if #list == 0 then return "" end
+  return "  (" .. table.concat(list, ", ") .. ")"
+end
+
+local function power_part(site, list)
+  if site.powered_by then table.insert(list, string.format("power x%.2f", 1 + C.POWER.bonus)) end
+end
+
 function M.site_status(site)
   local kind = C.KINDS[site.kind]
   local parts = {}
   if site.kind == "town" then
-    table.insert(parts, "Pop: " .. fmt(site.pop))
+    table.insert(parts, "Pop " .. fmt(site.pop))
   else
     table.insert(parts, "Level " .. site.level)
   end
+  if kind.secondary then
+    local ins = {}
+    for _, it in pairs(kind.accepts) do table.insert(ins, icon(it) .. " " .. pile(site.input[it], C.INPUT_CAP)) end
+    table.insert(parts, "In: " .. table.concat(ins, ", "))
+  elseif site.kind == "power-plant" then
+    local f = math.floor(site.fuel or 0)
+    local note = f >= C.POWER.cap - 1 and "full, " or ""
+    table.insert(parts, "Fuel: " .. fmt(f) .. " / " .. fmt(C.POWER.cap) ..
+      (f > 0 and string.format(" (%s%d min)", note, math.ceil(fuel_minutes(site))) or ""))
+  end
   if #kind.produces > 0 then
-    local waiting = {}
+    local outs = {}
     for _, it in pairs(kind.produces) do
       -- whole units only: trains load whole units, and a leftover fraction (e.g. 0.6) would
       -- otherwise round up to a phantom "1" while a train is loading
-      table.insert(waiting, "[item=" .. it .. "] " .. fmt(math.floor(site.stock[it] or 0)))
-    end
-    table.insert(parts, "Waiting for pickup: " .. table.concat(waiting, ", "))
-  end
-  if site.kind == "power-plant" then
-    table.insert(parts, plant_running(site) and string.format("Fuel: %d min", math.ceil(fuel_minutes(site)))
-      or "[color=#ff9070]Out of fuel[/color]")
-  end
-  if #kind.accepts > 0 then
-    table.insert(parts, "Wants: " .. cargo_list_str(kind.accepts))
-  end
-  return table.concat(parts, "  |  ")
-end
-
--- What an industry's level means, and how far it is from the next one.
-local function level_note(site)
-  local kind = C.KINDS[site.kind]
-  local need = C.LEVEL_AT[site.level]
-  local nxt = need and ("Next level at " .. fmt(need) .. " shipped (" .. fmt(site.shipped) .. " so far).")
-    or "Top level."
-  if kind.base then
-    local item, base = next(kind.base)
-    local mult = 1 + C.LEVEL_BONUS * (site.level - 1)
-    local service = 0.6 + 0.4 * site.rating
-    local s = string.format("Level %d: output x%d. ", site.level, mult)
-    service = service * power_mult(site)
-    if (site.stock[item] or 0) >= C.STOCK_CAP * site.level - 1 then
-      s = s .. "Stockpile full (" .. fmt(C.STOCK_CAP * site.level) .. "): production waits for a pickup"
-    else
-      s = s .. string.format("Making %.1f [item=%s]/s", base * mult * service, item)
-      local svc = 0.6 + 0.4 * site.rating
-      if svc < 0.99 then
-        s = s .. string.format(" (x%.2f until trains pick up every minute)", svc)
+      if site.kind == "town" then
+        table.insert(outs, icon(it) .. " " .. fmt(math.floor(site.stock[it] or 0)))
+      else
+        table.insert(outs, icon(it) .. " " .. pile(site.stock[it], C.STOCK_CAP * site.level))
       end
     end
-    return s .. ". " .. nxt
-  elseif kind.main then
-    return string.format("Level %d: processes up to %s [item=%s]/s. ", site.level,
-      fmt(C.PROCESS_RATE * site.level * power_mult(site)), kind.main) .. nxt
+    table.insert(parts, "Out: " .. table.concat(outs, ", "))
   end
-end
-
--- Second status line: what drives this site (town growth by source, industry boost, level).
-local site_detail_core
-local function plant_detail(site)
-  local r = fmt(supply_radius(site))
-  local s
-  if plant_running(site) then
-    s = string.format("Running: %d min of fuel. Powering %d site%s within %s tiles (+%d%%). ",
-      math.ceil(fuel_minutes(site)), site.powering or 0, site.powering == 1 and "" or "s", r, C.POWER.bonus * 100)
-  else
-    s = "Out of fuel. Deliver [item=fd-coal] Coal or [item=fd-wood] Lumber to power sites within " .. r ..
-      " tiles (+" .. (C.POWER.bonus * 100) .. "%). "
+  if not kind.secondary and #kind.accepts > 0 then
+    table.insert(parts, "Accepts " .. cargo_list_str(kind.accepts))
   end
-  s = s .. "Burns " .. C.POWER.burn .. " [item=fd-coal]/s (lumber counts half), holds " ..
-    fmt(C.POWER.cap / C.POWER.burn / 60) .. " min. "
-  local need = C.LEVEL_AT[site.level]
-  s = s .. "Level " .. site.level .. ": supply radius " .. r .. ". "
-  if need then
-    s = s .. "Next level at " .. fmt(need) .. " fuel burnt (" .. fmt(site.burnt or 0) .. " so far)."
-  else
-    s = s .. "Top level."
-  end
-  return s
-end
-
-local function powered_note(site)
-  local p = site.powered_by and storage.sites[site.powered_by]
-  if not p then return nil end
-  return "Powered by " .. site_title(p) .. ": +" .. (C.POWER.bonus * 100) .. "%."
+  return table.concat(parts, SEP)
 end
 
 function M.site_detail(site)
-  if site.kind == "power-plant" then return plant_detail(site) end
-  local core = site_detail_core(site)
-  local pw = powered_note(site)
-  local lvl = site.kind ~= "town" and #C.KINDS[site.kind].produces > 0 and level_note(site) or nil
-  local out
-  for _, part in pairs({ core, lvl, pw }) do
-    if part then
-      if out then out = out .. (out:sub(-1) == "." and " " or ". ") .. part else out = part end
-    end
-  end
-  return out
-end
-
-site_detail_core = function(site)
   local kind = C.KINDS[site.kind]
+  local m = {}
   if site.kind == "town" then
-    local per = "Each new resident needs " .. fmt(M.goods_per_resident(site)) .. " [item=fd-goods]"
+    local per = fmt(M.goods_per_resident(site)) .. " " .. icon("fd-goods") .. " per resident"
     local gained = site.growth and site.growth["fd-goods"] or 0
+    local s
     if gained < 0.5 then
-      return "Stable. Deliver [item=fd-goods] Goods to grow. " .. per .. "."
+      s = "Stable: deliver " .. icon("fd-goods") .. " to grow, " .. per
+    else
+      s = "Growing +" .. fmt(gained) .. "/min (" .. string.format("%.1f", gained / math.max(1, site.pop) * 100) ..
+        "%), " .. per
     end
-    return "Growing +" .. fmt(gained) .. "/min (" .. string.format("%.1f", gained / math.max(1, site.pop) * 100) ..
-      "%) from [item=fd-goods] Goods. " .. per .. "."
+    power_part(site, m)
+    return s .. mults(m)
+  elseif site.kind == "power-plant" then
+    local r = fmt(supply_radius(site))
+    local s
+    if plant_running(site) then
+      local n = site.powering or 0
+      s = "Running: powering " .. n .. " site" .. (n == 1 and "" or "s") .. " within " .. r .. " tiles" ..
+        mults({ string.format("power x%.2f", 1 + C.POWER.bonus) })
+    else
+      s = "Out of fuel: needs " .. icon("fd-coal") .. " or " .. icon("fd-wood") .. " to power sites within " .. r .. " tiles"
+    end
+    return s .. SEP .. next_level(site, site.burnt)
+  elseif kind.base then
+    local item, base = next(kind.base)
+    local lvl = 1 + C.LEVEL_BONUS * (site.level - 1)
+    local svc = 0.6 + 0.4 * site.rating
+    local s
+    if (site.stock[item] or 0) >= C.STOCK_CAP * site.level - 1 then
+      s = "Stockpile full: waiting for pickup"
+    else
+      if lvl > 1 then table.insert(m, string.format("level x%g", lvl)) end
+      power_part(site, m)
+      if svc < 0.95 then table.insert(m, string.format("service x%.2f", svc)) end
+      s = string.format("Producing %.1f %s/s", base * lvl * svc * power_mult(site), icon(item)) .. mults(m)
+    end
+    return s .. SEP .. next_level(site, site.shipped)
   elseif kind.main then
-    local main_l, boost_l = C.CARGO[kind.main].label, C.CARGO[kind.booster].label
-    local main_i, boost_i = "[item=" .. kind.main .. "]", "[item=" .. kind.booster .. "]"
-    local top = kind.full_yield / kind.base_yield
-    local stock = "Stockpile: " .. main_i .. " " .. fmt(site.input[kind.main] or 0) .. ", " ..
-      boost_i .. " " .. fmt(site.input[kind.booster] or 0)
-    if site.input_full_tick and game.tick - site.input_full_tick < 180 then
-      stock = stock .. " (full: trains wait to unload)"
-    end
+    local s
     if site.output_full then
-      local out_i = "[item=" .. kind.produces[1] .. "]"
-      return "Paused: output full (" .. out_i .. " " .. fmt(site.stock[kind.produces[1]] or 0) ..
-        "). Ship it out to restart. " .. stock
+      s = "Paused: output full"
+    elseif not site.made_tick or game.tick - site.made_tick > 120 then
+      s = "Idle: needs " .. icon(kind.main)
+    else
+      local boost = (kind.base_yield + (kind.full_yield - kind.base_yield) * (site.boost or 0)) / kind.base_yield
+      if (site.boost or 0) >= 0.99 then
+        table.insert(m, string.format("boost x%.1f max", boost))
+      elseif (site.boost or 0) > 0.01 then
+        table.insert(m, string.format("boost x%.1f", boost))
+      else
+        table.insert(m, "boost x1.0, no " .. icon(kind.booster))
+      end
+      power_part(site, m)
+      s = string.format("Making %.1f %s/s from %.1f %s/s", site.made or 0, icon(kind.produces[1]),
+        site.used or 0, icon(kind.main)) .. mults(m)
     end
-    if not site.made_tick or game.tick - site.made_tick > 120 then
-      return "Idle: needs " .. main_i .. " " .. main_l .. " (" .. boost_i .. " " .. boost_l ..
-        " only boosts it, up to x" .. top .. "). " .. stock
-    end
-    local mult = (kind.base_yield + (kind.full_yield - kind.base_yield) * (site.boost or 0)) / kind.base_yield
-    local made = string.format("Making %.1f [item=%s]/s. ", site.made or 0, kind.produces[1])
-    if (site.boost or 0) >= 0.99 then
-      return string.format("Output x%.1f, fully boosted by ", mult) .. boost_i .. " " .. boost_l .. ". " .. made .. stock
-    end
-    return string.format("Output x%.1f. Deliver ", mult) .. boost_i .. " " .. boost_l ..
-      " for up to x" .. top .. ". " .. made .. stock
+    return s .. SEP .. next_level(site, site.shipped)
   end
   return nil
 end
@@ -1271,6 +1267,7 @@ local function simulate_second()
         site.stock[item] = math.min(cap, (site.stock[item] or 0) + out)
         site.boost = frac
         site.made = out
+        site.used = p
         site.made_tick = game.tick
       end
     end
@@ -2053,6 +2050,7 @@ remote.add_interface("freight_dispatch", {
   queue_ghost = function(g) table.insert(storage.ghost_queue, { ghost = g, tries = 0 }) end,
   buy_upgrade = function(id) M.buy_upgrade(nil, id); return storage.upgrades[id] end,
   site_detail = function(id) return storage.sites[id] and M.site_detail(storage.sites[id]) end,
+  site_status = function(id) return storage.sites[id] and M.site_status(storage.sites[id]) end,
   set_input = function(id, item, amount) storage.sites[id].input[item] = amount end,
   get_input = function(id, item) return storage.sites[id].input[item] end,
   set_fuel = function(id, amount) storage.sites[id].fuel = amount end,

@@ -7,59 +7,44 @@ function G.init(m) M = m end
 
 local HELP = [[
 [font=default-large-bold]How to play[/font]
-You run a railway company. You don't build a factory here. Towns and industries are scattered across the map, each inside a coloured ring. Connect them by rail to earn money.
+You run a railway. Towns and industries sit inside coloured rings across the map. Link them by rail and get paid for what you carry.
 
-[font=default-bold]1. Serve a site.[/font] Build a train stop inside a site's ring. The stop is named after the site automatically. A stop can serve more than one site if their rings overlap. Town rings grow as the town grows, and every town keeps a clear street cross through its centre, wide enough for a downtown station. Town buildings never get built right next to your track.
+[font=default-bold]1. Serve a site.[/font] Build a train stop inside its ring (it's named after the site). Overlapping rings share a stop. Towns keep a clear street cross through the centre for a downtown station, and never build next to your track.
+[font=default-bold]2. Run trains.[/font] On arrival, cargo the site accepts unloads at once. While waiting, cargo it produces loads.
+  [color=yellow]Pick-up:[/color] "Full cargo OR 30 seconds".  [color=yellow]Drop-off only:[/color] "Empty cargo" (never loads there).
+  Two-way passenger lines and loops: "Full cargo OR 30 seconds" at every town.
+[font=default-bold]3. Get paid.[/font] Amount x straight-line distance x cargo rate. Cargo must travel 60+ tiles, and slow trips pay less (passengers and mail lose value fastest).
+[font=default-bold]4. Grow.[/font] Industries level up as you ship from them. Towns grow only from goods. More output means more trains, so signalling matters.
+[font=default-bold]5. Upgrade.[/font] The Shop sells fuel, bigger wagons, faster station crews and running shoes. Each applies to every train.
 
-[font=default-bold]2. Run trains.[/font] Give a train a schedule between two stops. When a train arrives, cargo the site accepts is unloaded at once. Then, while it waits, cargo the site produces is loaded. Wagon filters work as normal.
-  [color=yellow]Pick-up stop:[/color] wait "Full cargo OR 30 seconds".
-  [color=yellow]Drop-off only:[/color] wait "Empty cargo". The train only unloads there and never loads, so it leaves as soon as it's empty. Use this at a steel mill, factory or power plant, or a town you only deliver to.
-  Two-way passenger routes: use "Full cargo OR 30 seconds" at both towns.
+Whenever fewer than 6 sites are unserved, a new one is founded 200-500 tiles from your network and announced in chat. Contracts only name places you already serve.
 
-[font=default-bold]3. Get paid.[/font] Pay = amount x straight-line distance x cargo rate x speed bonus. Slow deliveries pay less, and passengers and mail lose value fastest. Cargo must travel at least 60 tiles.
-
-[font=default-bold]4. Grow.[/font] Industries level up as you ship from them. Each level adds the base output again (a level-4 mine makes 4 times as much as at level 1), and each steel mill or factory level lets it process 50 more per second. The status line shows the level and how much more shipping the next one takes. Towns grow only from goods: passengers and mail are your steady income, and goods from factories are what turn a village into a city. Bigger towns make more passengers and mail, but each new resident needs more goods as a town grows. More output means more trains, and more trains means you need good signalling. Watch for deadlock and train-wreck alerts. Each site's second status line (on the map and in the Sites list) shows what drives it: a town's growth per minute by source, or an industry's output multiplier and stockpile.
-
-[font=default-bold]5. Upgrade.[/font] The Shop sells upgrades that apply to every train at once: better fuel (faster acceleration and top speed), bigger cargo wagons, and station crews that load faster. Running shoes make you run faster.
-
-You start with a full goods chain spread around spawn. Whenever fewer than 6 sites are left unserved, a new one is founded 200 to 500 tiles from your network, usually a kind the map is short of, and announced in chat (click its map link). Towns stay at least 300 tiles apart. Contracts stick to places your network already serves.
-
-[font=default-bold]Supply chains[/font]
-[item=fd-coal] Coal Mine -> Power Plant or Steel Mill
-[item=fd-wood] Lumber Camp -> Power Plant (counts as half a coal) or Factory
-Power plants burn 15 coal a second and hold 20 minutes of fuel. While a plant has fuel, every site within its supply circle (250 tiles, a little more each level) is powered: towns make 25% more passengers and mail and grow 25% more per good, mines and lumber camps make 25% more, and steel mills and factories process 25% more. A site is powered by one plant at most, so build plants near different clusters rather than many in one place. Running dry only switches the bonus off.
-[item=fd-iron-ore] Iron Mine -> Steel Mill. Coal is a booster: steel output goes up to x2 with half a coal per ore. Coal alone makes nothing.
-[item=fd-steel] Steel Mill -> Factory. [item=fd-wood] Lumber is a booster: goods output goes up to x2 with half a lumber per steel. Lumber alone makes nothing.
-[item=fd-goods] Factory -> Towns (the only way towns grow)
-Steel mills and factories hold up to 20,000 of each input. When a pile is full, trains unload only what fits and keep the rest aboard: with "Empty cargo" they wait until it all fits, and with a time condition they leave with it. When the output pile is full, the site pauses instead of wasting anything. Nothing is ever thrown away.
-[item=fd-passengers][item=fd-mail] Town <-> Town
+[font=default-bold]Sites[/font]
+[item=fd-passengers] [font=default-bold]Town[/font]  Needs: nothing. Helped by: [item=fd-goods] goods (the only way to grow), power. Makes: [item=fd-passengers] passengers and [item=fd-mail] mail for other towns, more as it grows.
+[item=fd-coal] [font=default-bold]Coal Mine[/font]  Needs: nothing. Helped by: regular pickups, levels, power. Makes: [item=fd-coal] coal for steel mills and power plants.
+[item=fd-iron-ore] [font=default-bold]Iron Mine[/font]  Needs: nothing. Helped by: regular pickups, levels, power. Makes: [item=fd-iron-ore] iron ore for steel mills.
+[item=fd-wood] [font=default-bold]Lumber Camp[/font]  Needs: nothing. Helped by: regular pickups, levels, power. Makes: [item=fd-wood] lumber for factories and power plants.
+[item=fd-steel] [font=default-bold]Steel Mill[/font]  Needs: [item=fd-iron-ore] iron ore. Helped by: [item=fd-coal] coal (up to x2 with half a coal per ore), levels, power. Makes: [item=fd-steel] steel for factories.
+[item=fd-goods] [font=default-bold]Factory[/font]  Needs: [item=fd-steel] steel. Helped by: [item=fd-wood] lumber (up to x2 with half a lumber per steel), levels, power. Makes: [item=fd-goods] goods for towns.
+[item=fd-coal] [font=default-bold]Power Plant[/font]  Needs: [item=fd-coal] coal or [item=fd-wood] lumber (worth half). Burns 15 a second, holds 20 minutes. Makes: power, +25% for every site in its circle (250 tiles, wider each level). One plant per site, so spread them out.
+Each level adds the base output again (mines) or 50 more processed per second (mills, factories). Mines make less ("service") until trains pick up regularly. Input piles hold 20,000: when full, trains keep the rest aboard, and a full output pile pauses the site. Nothing is wasted.
 
 [font=default-bold]Building[/font]
-- In the Shop, [color=yellow]Place[/color] puts a ghost in your cursor. Any ghost you place (including blueprints, and from map view with M) is built instantly. Matching items in your inventory are used first, and the rest is paid in cash, so you never need to buy rails ahead of time. Trees in the way are cleared for a small fee. A floating note shows what each build cost.
-- Map: your trains reveal the land around them as they run, and your train stops keep a live view of their area. To scout somewhere new (for example the route to a new site), open the map (M), look at the area, and buy a Land survey from the Shop.
-- In the Sites list (and on contracts in the left panel), click a name to jump the map view there. Shift+click to travel there in person.
-- Rail costs: straight $50, diagonal $100, curve $150. Ghosts you can't afford yet wait and build as soon as the money comes in.
-- The deconstruction planner removes your rails and signals instantly and refunds 75% of the price.
-- The upgrade planner swaps signals instantly (rail signal <-> chain signal).
-- Locomotives refuel themselves with your current fuel upgrade. You pay for the fuel.
+- Shop [color=yellow]Place[/color] puts a ghost in your cursor. Every ghost (blueprints and map view too) builds instantly, from your inventory first, then cash. Unaffordable ghosts wait for the money. Trees in the way cost a small fee.
+- Rails: straight $50, diagonal $100, curve $150. Deconstruction refunds 75%. The upgrade planner swaps rail and chain signals.
+- Locomotives refuel themselves at your expense. Idle trains cost nothing.
+- Trains and stops reveal the map around them. A Land survey (Shop) reveals the area you're looking at.
+- Click a name in the Sites list or a contract to view it. Shift+click to travel there.
 
-[font=default-bold]Signalling refresher[/font]
-Rail signal: one train per block. Place it where a train should wait.
-Chain signal: looks ahead to the next signal. Put chain signals at junction entries and inside junctions, and a rail signal at each exit, so trains never stop in the middle of a junction.
+[font=default-bold]Signals[/font]
+Rail signal: one train per block, place it where trains should wait. Chain signal: at junction entries and inside junctions, with a rail signal at each exit, so trains never stop inside a junction.
 
-[font=default-bold]Circuits (optional): Site signals[/font]
-Buy [item=fd-site-signals] Site signals in the Shop and build it inside a site's ring, close to your stop or signal (wires reach about 9 tiles). Every second it outputs that site's stockpile: a steel mill shows its [item=fd-iron-ore] ore, [item=fd-coal] coal and [item=fd-steel] steel, a town its waiting [item=fd-passengers] passengers and [item=fd-mail] mail. It also outputs [virtual-signal=signal-P] population (towns) or [virtual-signal=signal-L] level (industries), and a power plant its fuel pile as [virtual-signal=signal-F]. No power is needed.
-To wire it: click the red or green wire button in the shortcut bar (bottom right), click the box, then click the train stop or rail signal. Then open the stop or signal and tick its circuit option. When you pick the signal for a condition, choose the freight version, which has a small locomotive badge (for example "Lumber (freight)", not vanilla "Wood"). They look alike, but only the freight one carries the site's numbers.
-- Keep a mill at full boost: wire the box to the mill's ore drop-off stop and choose "Enable/disable" with [item=fd-coal] Coal > 1000. Ore only arrives while there is coal to boost it, and the mill eats ore within seconds, so every unit gets the full x2. Do the same at a factory's steel stop with [item=fd-wood] Lumber > 1000.
-- A disabled stop is skipped, so the train goes on to its next stop. To hold the train instead, wire a rail signal before the stop (on a siding off the main line) and set it to close when Coal < 1000.
-- Only send a train when there is a full load: wire a town's box to its stop and enable it while [item=fd-passengers] Passengers > 4000.
-
-[font=default-bold]Combining conditions: Decider combinator (no power)[/font]
-A stop or signal takes only one condition. To combine several, buy a [item=fd-decider] Decider combinator in the Shop. Wire the Site signals box to its input side, and its output side to the stop. In the decider, add conditions (switch the joiner between AND and OR), and set the output to a signal such as [virtual-signal=signal-red] = 1. Then set the stop to Enable/disable with [virtual-signal=signal-red] = 0, so the stop is on unless the decider fires. Useful rules:
-- Steel mill, coal stop: [item=fd-coal] Coal > 15000
-- Steel mill, ore stop: [item=fd-iron-ore] Iron ore > 15000 OR [item=fd-coal] Coal < 1000
-- Factory, steel stop: [item=fd-steel] Steel > 15000 OR [item=fd-wood] Lumber < 1000
-(A single condition like the coal stop's needs no decider: enable the stop while Coal < 15000.)
+[font=default-bold]Circuits (optional)[/font]
+[item=fd-site-signals] Site signals (Shop), built inside a ring, outputs that site's piles every second, plus [virtual-signal=signal-P] population, [virtual-signal=signal-L] level or [virtual-signal=signal-F] fuel. Wire it with the red or green wire button (shortcut bar), then tick the stop's or signal's circuit option. Pick the freight item (with the small locomotive badge), not the vanilla one.
+- Full boost: enable a mill's ore stop while [item=fd-coal] Coal > 1000 (factory steel stop: [item=fd-wood] Lumber > 1000).
+- A disabled stop is skipped. To hold a train instead, close a rail signal before the stop.
+- Full loads only: enable a town's stop while [item=fd-passengers] Passengers > 4000.
+[item=fd-decider] Decider combinator (Shop, no power) combines conditions: box -> decider input, decider output -> stop. Output [virtual-signal=signal-red] = 1 when it should stop, and enable the stop while [virtual-signal=signal-red] = 0. For example, steel mill ore stop: [item=fd-iron-ore] Iron ore > 15000 OR [item=fd-coal] Coal < 1000.
 ]]
 
 local function hud(player)
