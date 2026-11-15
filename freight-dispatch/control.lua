@@ -72,6 +72,31 @@ local function power_mult(site)
 end
 M.power_mult = power_mult
 
+-- Flow meters (0.5.0, for the Supply chain window): each site adds up what happens to it this
+-- minute in site.fl_cur, and simulate_minute pushes that onto site.fl_hist (newest first, at
+-- most C.FLOW_MINUTES). Keys: "mk:<item>" made, "rx:<item>" delivered by train, "tx:<item>"
+-- picked up, "busy"/"starve"/"block" (fractions of a second at full speed, short of the main
+-- input, paused by a full output pile), "full" (seconds with a full stockpile), "bdef"/"proc"
+-- (booster shortfall weighted by processed main input), "secs" (seconds counted).
+local function fl_add(site, key, v)
+  local c = site.fl_cur
+  if not c then c = {}; site.fl_cur = c end
+  c[key] = (c[key] or 0) + v
+end
+
+local function fl_sum(site, key)
+  local t = (site.fl_cur and site.fl_cur[key]) or 0
+  for _, h in pairs(site.fl_hist or {}) do t = t + (h[key] or 0) end
+  return t
+end
+
+-- per-second average over the window (0 until the site has been measured)
+local function fl_rate(site, key)
+  local secs = fl_sum(site, "secs")
+  return secs > 0 and fl_sum(site, key) / secs or 0
+end
+M.fl_rate = fl_rate
+
 -- Goods a town needs per new resident; rises with population so big cities take many goods.
 -- A powered town grows 25% more per good.
 function M.goods_per_resident(site)
@@ -579,13 +604,13 @@ end
 local function update_supply_circle(site)
   if site.kind ~= "power-plant" or not site.render then return end
   local on = plant_running(site)
-  local a = on and 0.45 or 0.12
+  local a = on and 0.75 or 0.2 -- 0.5.3: was 0.45 / 0.12 and widths 4 / 2 (Steve: too hard to see)
   local col = { 0.9 * a, 0.5 * a, 0.9 * a, a }
   for _, key in pairs({ "supply", "supply_map" }) do
     local o = site.render[key]
     if not (o and o.valid) then
       o = rendering.draw_circle({
-        color = col, radius = supply_radius(site), width = key == "supply" and 4 or 2, filled = false,
+        color = col, radius = supply_radius(site), width = key == "supply" and 6 or 3, filled = false,
         target = { site.x, site.y }, surface = surface(), draw_on_ground = true,
         render_mode = key == "supply" and "game" or "chart",
       })
@@ -593,6 +618,7 @@ local function update_supply_circle(site)
     end
     o.radius = supply_radius(site)
     o.color = col
+    o.width = key == "supply" and 6 or 3
   end
 end
 
@@ -1012,6 +1038,7 @@ end
 
 local function on_delivered(site, item, amount)
   site.delivered = site.delivered + amount
+  fl_add(site, "rx:" .. item, amount)
   local kind = C.KINDS[site.kind]
   if kind.secondary then
     site.input[item] = math.min(C.INPUT_CAP, (site.input[item] or 0) + amount)
@@ -1180,6 +1207,7 @@ local function service_train(train)
             site.stock[o.item] = site.stock[o.item] - ins
             site.shipped = site.shipped + ins
             site.picked_min = site.picked_min + ins
+            fl_add(site, "tx:" .. o.item, ins)
             budget = budget - ins
             loaded = loaded + ins
             o.avail = o.avail - ins
@@ -1228,6 +1256,7 @@ local function update_power()
     if site.kind == "power-plant" then
       local was = plant_running(site)
       local b = math.min(site.fuel or 0, C.POWER.burn)
+      fl_add(site, "starve", 1 - b / C.POWER.burn)
       site.fuel = (site.fuel or 0) - b
       if site.fuel < 0.001 then site.fuel = 0 end
       site.burnt = (site.burnt or 0) + b
@@ -1255,25 +1284,39 @@ local function simulate_second()
     local kind = C.KINDS[site.kind]
     local service = (0.6 + 0.4 * site.rating) * power_mult(site)
     local cap = C.STOCK_CAP * site.level
+    fl_add(site, "secs", 1)
     if site.kind == "town" then
       local pax = site.pop / 60 * service
       local mail = site.pop / 400 * service
       cap = C.STOCK_CAP + site.pop * 4
-      site.stock["fd-passengers"] = math.min(cap, (site.stock["fd-passengers"] or 0) + pax)
-      site.stock["fd-mail"] = math.min(cap / 4, (site.stock["fd-mail"] or 0) + mail)
+      local p0, m0 = site.stock["fd-passengers"] or 0, site.stock["fd-mail"] or 0
+      site.stock["fd-passengers"] = math.min(cap, p0 + pax)
+      site.stock["fd-mail"] = math.min(cap / 4, m0 + mail)
+      fl_add(site, "mk:fd-passengers", math.max(0, site.stock["fd-passengers"] - p0))
+      fl_add(site, "mk:fd-mail", math.max(0, site.stock["fd-mail"] - m0))
+      if site.stock["fd-passengers"] >= cap - 1 then fl_add(site, "full", 1) end
     elseif kind.base then
       local mult = (1 + C.LEVEL_BONUS * (site.level - 1)) * service
       for item, rate in pairs(kind.base) do
-        site.stock[item] = math.min(cap, (site.stock[item] or 0) + rate * mult)
+        local s0 = site.stock[item] or 0
+        site.stock[item] = math.min(cap, s0 + rate * mult)
+        fl_add(site, "mk:" .. item, math.max(0, site.stock[item] - s0))
+        if site.stock[item] >= cap - 1 then fl_add(site, "full", 1) end
       end
     elseif kind.main then
       -- steel mill (ore, boosted by coal) and factory (steel, boosted by lumber):
       -- the booster alone makes nothing; it raises the yield of the main input.
       local main = site.input[kind.main] or 0
-      local p = math.min(main, C.PROCESS_RATE * site.level * power_mult(site))
+      local full_rate = C.PROCESS_RATE * site.level * power_mult(site)
+      local p = math.min(main, full_rate)
       local item = kind.produces[1]
       local room = cap - (site.stock[item] or 0)
       site.output_full = p > 0 and room < 1
+      if room < 1 then
+        fl_add(site, "full", 1)
+        if p > 0 then fl_add(site, "block", 1) end
+      end
+      if p <= 0 then fl_add(site, "starve", 1) end
       if p > 0 and room >= 1 then
         local b = math.min(site.input[kind.booster] or 0, p * 0.5)
         local frac = b / (p * 0.5)
@@ -1290,6 +1333,13 @@ local function simulate_second()
         site.made = out
         site.used = p
         site.made_tick = game.tick
+        fl_add(site, "mk:" .. item, out)
+        fl_add(site, "busy", p / full_rate)
+        -- short of ore this second: whatever part of full speed it couldn't run (unless the
+        -- output pile was what held it back)
+        if out < room then fl_add(site, "starve", 1 - p / full_rate) else fl_add(site, "block", 1 - p / full_rate) end
+        fl_add(site, "proc", p)
+        fl_add(site, "bdef", p * (1 - frac))
       end
     end
   end
@@ -1300,6 +1350,10 @@ local function simulate_minute()
     local served = site.picked_min > 0 and 1 or 0
     site.rating = site.rating * 0.75 + 0.25 * served
     site.picked_min = 0
+    site.fl_hist = site.fl_hist or {}
+    table.insert(site.fl_hist, 1, site.fl_cur or {})
+    while #site.fl_hist > C.FLOW_MINUTES do table.remove(site.fl_hist) end
+    site.fl_cur = {}
     level_up_check(site)
     if site.kind == "town" then
       -- last minute's growth, by source, for the status line
@@ -2058,6 +2112,264 @@ function M.income_per_min()
   return t * 60 / math.max(1, #storage.income_hist)
 end
 
+---------------------------------------------------------------------------
+-- Supply chain analysis (0.5.0, Steve asked for an in-game way to see shortages and what to
+-- work on next). Served sites only, averaged over the flow meters' window (C.FLOW_MINUTES).
+--   row per freight cargo: made / delivered / wanted per second, producers, consumers, status
+--     short  = a consumer spent > CHAIN_SHORT of its time without it (booster: boost below full,
+--              power plant: dry), with a cause:
+--              none (nothing connected makes it), pickup (producer piles full, irregular pickups,
+--              or enough is made but trains don't carry it), upstream (the producing mill or
+--              factory is itself short of `cause_item`), capacity (producer at full speed),
+--              production (producers just don't make enough)
+--     backed = nobody short, but a producer's pile keeps filling up (needs more pickups)
+--   next   = one suggestion: the root cause with the biggest effect, plus sites to click.
+--            Expansion over levelling (Steve's choice): it names a spare site to connect.
+---------------------------------------------------------------------------
+local CHAIN_ITEMS = { "fd-iron-ore", "fd-coal", "fd-steel", "fd-wood", "fd-goods" }
+M.CHAIN_ITEMS = CHAIN_ITEMS
+local ROLE_WEIGHT = { main = 1, booster = 0.5, fuel = 0.3 }
+local FULL_SHARE = 0.15 -- a pile full this much of the time means pickups can't keep up
+
+local function producer_kind(item)
+  for _, k in ipairs(C.KIND_ORDER) do
+    for _, it in pairs(C.KINDS[k].produces) do
+      if it == item then return k end
+    end
+  end
+end
+
+local function nearest_spare(kind, to, served)
+  local best, bd
+  for id, s in pairs(storage.sites) do
+    if s.kind == kind and not served[id] then
+      local d = dist(s.x, s.y, to.x, to.y)
+      if not bd or d < bd then best, bd = s, d end
+    end
+  end
+  return best, bd
+end
+
+local function basic_kind(kind)
+  for _, tier in ipairs(C.FOUND_TIERS) do
+    for _, k in ipairs(tier.kinds) do
+      if k == kind then return tier.basic or false end
+    end
+  end
+  return false
+end
+
+local function kind_label(kind) return C.KINDS[kind].label:lower() end
+local function item_label(item) return icon(item) .. " " .. C.CARGO[item].label:lower() end
+local function pct(f) return math.floor(f * 100 + 0.5) .. "%" end
+
+function M.supply_chain()
+  local served = served_ids()
+  local rows = {}
+  for _, it in ipairs(CHAIN_ITEMS) do
+    rows[it] = { item = it, made = 0, got = 0, wanted = 0, producers = {}, consumers = {} }
+  end
+  local towns = { n = 0, growing = {}, full = {},
+    pax = { made = 0, carried = 0, got = 0 }, mail = { made = 0, carried = 0, got = 0 } }
+  local window = 0
+  local spare = {}
+  for id, s in pairs(storage.sites) do
+    if not served[id] then spare[s.kind] = (spare[s.kind] or 0) + 1 end
+  end
+  local ids = {}
+  for id in pairs(served) do if storage.sites[id] then table.insert(ids, id) end end
+  table.sort(ids)
+  for _, id in ipairs(ids) do
+    local s = storage.sites[id]
+    local kind = C.KINDS[s.kind]
+    window = math.max(window, fl_sum(s, "secs"))
+    if s.kind == "town" then
+      towns.n = towns.n + 1
+      if (s.growth and s.growth["fd-goods"] or 0) >= 0.5 then table.insert(towns.growing, s) end
+      if fl_rate(s, "full") > FULL_SHARE then table.insert(towns.full, s) end
+      for key, it in pairs({ pax = "fd-passengers", mail = "fd-mail" }) do
+        local t = towns[key]
+        t.made = t.made + fl_rate(s, "mk:" .. it)
+        t.carried = t.carried + fl_rate(s, "tx:" .. it)
+        t.got = t.got + fl_rate(s, "rx:" .. it)
+      end
+      table.insert(rows["fd-goods"].consumers, { site = s, role = "town", wanted = 0, got = fl_rate(s, "rx:fd-goods"), short = 0 })
+    elseif kind.base then
+      local item = next(kind.base)
+      table.insert(rows[item].producers, { site = s, rate = fl_rate(s, "mk:" .. item), full = fl_rate(s, "full"),
+        service = 0.6 + 0.4 * s.rating })
+    elseif kind.main then
+      local item = kind.produces[1]
+      local full_rate = C.PROCESS_RATE * s.level * power_mult(s)
+      local proc = fl_sum(s, "proc")
+      local p = { site = s, rate = fl_rate(s, "mk:" .. item), full = fl_rate(s, "full"), busy = fl_rate(s, "busy"),
+        starve = fl_rate(s, "starve"), block = fl_rate(s, "block"), bshort = proc > 0 and fl_sum(s, "bdef") / proc or 0,
+        main = kind.main, booster = kind.booster }
+      table.insert(rows[item].producers, p)
+      table.insert(rows[kind.main].consumers, { site = s, role = "main", wanted = full_rate,
+        got = fl_rate(s, "rx:" .. kind.main), short = p.starve, busy = p.busy })
+      table.insert(rows[kind.booster].consumers, { site = s, role = "booster", wanted = full_rate * 0.5,
+        got = fl_rate(s, "rx:" .. kind.booster), short = p.bshort })
+    elseif s.kind == "power-plant" then
+      local fc = fl_sum(s, "rx:fd-coal") * C.POWER.fuel["fd-coal"]
+      local fw = fl_sum(s, "rx:fd-wood") * C.POWER.fuel["fd-wood"]
+      local share = (fc + fw) > 0 and fc / (fc + fw) or 1 -- coal's part of its fuel
+      local dry = fl_rate(s, "starve")
+      if share > 0 then
+        table.insert(rows["fd-coal"].consumers, { site = s, role = "fuel", wanted = C.POWER.burn * share / C.POWER.fuel["fd-coal"],
+          got = fl_rate(s, "rx:fd-coal"), short = share >= 0.5 and dry or 0 })
+      end
+      if share < 1 then
+        table.insert(rows["fd-wood"].consumers, { site = s, role = "fuel", wanted = C.POWER.burn * (1 - share) / C.POWER.fuel["fd-wood"],
+          got = fl_rate(s, "rx:fd-wood"), short = share < 0.5 and dry or 0 })
+      end
+    end
+  end
+
+  -- status and cause per row
+  for _, it in ipairs(CHAIN_ITEMS) do
+    local r = rows[it]
+    for _, p in ipairs(r.producers) do r.made = r.made + p.rate end
+    local worst, wsev = nil, 0
+    for _, c in ipairs(r.consumers) do
+      r.wanted = r.wanted + c.wanted
+      r.got = r.got + c.got
+      local sev = c.short * (ROLE_WEIGHT[c.role] or 0)
+      if c.short > C.CHAIN_SHORT and sev > wsev then worst, wsev = c, sev end
+    end
+    r.who = worst and worst.site
+    r.sev = wsev
+    local fullest
+    for _, p in ipairs(r.producers) do
+      if p.full > FULL_SHARE and (not fullest or p.full > fullest.full) then fullest = p end
+    end
+    if worst then
+      r.status = "short"
+      local primary = r.producers[1] and C.KINDS[r.producers[1].site.kind].base
+      -- irregular pickups only count as the cause if full service would cover the demand;
+      -- otherwise more producers are the real fix (a newly connected mine starts at x0.60)
+      local lowsvc
+      if primary then
+        local potential = 0
+        for _, p in ipairs(r.producers) do potential = potential + p.rate / math.max(0.6, p.service) end
+        if potential >= 0.95 * r.wanted then
+          for _, p in ipairs(r.producers) do
+            if p.service < 0.85 and (not lowsvc or p.service < lowsvc.service) then lowsvc = p end
+          end
+        end
+      end
+      local starved, bshort, busiest
+      for _, p in ipairs(r.producers) do
+        if p.starve and (not starved or p.starve > starved.starve) then starved = p end
+        if p.bshort and (not bshort or p.bshort > bshort.bshort) then bshort = p end
+        if p.busy and (not busiest or p.busy > busiest.busy) then busiest = p end
+      end
+      if #r.producers == 0 then
+        r.cause = "none"
+      elseif fullest then
+        r.cause, r.from, r.why = "pickup", fullest.site, "full"
+        r.from_full = fullest.full
+      elseif lowsvc then
+        r.cause, r.from, r.why = "pickup", lowsvc.site, "service"
+        r.from_service = lowsvc.service
+      elseif not primary and starved and starved.starve > C.CHAIN_SHORT then
+        r.cause, r.from, r.cause_item = "upstream", starved.site, starved.main
+      elseif not primary and bshort and bshort.bshort > C.CHAIN_SHORT then
+        r.cause, r.from, r.cause_item = "upstream", bshort.site, bshort.booster
+      elseif not primary and busiest and busiest.busy >= 0.85 then
+        r.cause, r.from = "capacity", busiest.site
+        r.from_busy = busiest.busy
+      elseif r.made >= 0.95 * r.wanted then
+        r.cause, r.why = "pickup", "carry"
+      else
+        r.cause = "production"
+      end
+    elseif fullest then
+      r.status, r.from, r.from_full = "backed", fullest.site, fullest.full
+      r.sev = fullest.full * 0.3
+    elseif #r.consumers == 0 then
+      r.status = #r.producers > 0 and "unused" or nil
+    else
+      r.status = #r.producers > 0 and "ok" or nil
+    end
+  end
+
+  -- a few seconds of data say nothing yet (a single delivery reads as thousands per second)
+  if window < 120 then
+    for _, it in ipairs(CHAIN_ITEMS) do
+      local r = rows[it]
+      if r.status then r.status, r.cause, r.sev = "measuring", nil, 0 end
+    end
+  end
+
+  -- next step: follow "held back by" to the root, then the root with the biggest effect
+  local roots = {}
+  for _, it in ipairs(CHAIN_ITEMS) do
+    local r = rows[it]
+    if r.status == "short" or r.status == "backed" then
+      local cur, depth = r, 0
+      while cur.cause == "upstream" and depth < 5 and rows[cur.cause_item] and rows[cur.cause_item].status == "short" do
+        cur, depth = rows[cur.cause_item], depth + 1
+      end
+      roots[cur.item] = (roots[cur.item] or 0) + r.sev
+    end
+  end
+  local best, bs
+  for _, it in ipairs(CHAIN_ITEMS) do
+    if roots[it] and (not bs or roots[it] > bs) then best, bs = it, roots[it] end
+  end
+
+  local nxt = { sites = {} }
+  local function add_site(s) if s then table.insert(nxt.sites, s.id) end end
+  if window < 120 then
+    nxt.text = "Measuring: the supply chain needs a couple of minutes of play to average over."
+  elseif not best then
+    nxt.text = "Nothing is short right now: every mill, factory and power plant gets what it needs."
+  else
+    local r = rows[best]
+    local L = item_label(best)
+    if r.status == "backed" or (r.cause == "pickup" and r.why == "full") then
+      nxt.text = site_title(r.from) .. "'s " .. L .. " pile keeps filling up (full " .. pct(r.from_full) ..
+        " of the time): run more or bigger trains from it."
+      add_site(r.from)
+      if r.who then add_site(r.who) end
+    elseif r.cause == "pickup" and r.why == "service" then
+      nxt.text = site_title(r.from) .. " is picked up irregularly (" .. string.format("service x%.2f", r.from_service) ..
+        "), so it makes less: a train should call there at least once a minute. " .. site_title(r.who) .. " is short of " .. L .. "."
+      add_site(r.from); add_site(r.who)
+    elseif r.cause == "pickup" then
+      nxt.text = "Enough " .. L .. " is made (" .. fmt(r.made) .. "/s for " .. fmt(r.wanted) .. "/s), but " .. site_title(r.who) ..
+        " still runs short: trains aren't carrying enough. Add trains or wagons on that route."
+      add_site(r.who)
+    else
+      local pk = r.cause == "capacity" and r.from.kind or producer_kind(best)
+      local sp, d = nearest_spare(pk, r.who, served)
+      local head
+      if r.cause == "capacity" then
+        head = site_title(r.from) .. " runs flat out (busy " .. pct(r.from_busy) .. ") and " .. site_title(r.who) ..
+          " still wants more " .. L .. ": connect another " .. kind_label(pk) .. "."
+        add_site(r.from)
+      elseif r.cause == "none" then
+        head = site_title(r.who) .. " needs " .. L .. ", and no " .. kind_label(pk) .. " is connected."
+      else
+        head = site_title(r.who) .. " needs more " .. L .. ": your " .. kind_label(pk) .. "s make " .. fmt(r.made) ..
+          "/s, and it could use " .. fmt(r.wanted) .. "/s."
+      end
+      add_site(r.who)
+      if sp then
+        nxt.text = head .. " Connect " .. site_title(sp) .. " (" .. fmt(d) .. " tiles from " .. r.who.name .. ")."
+        add_site(sp)
+      elseif basic_kind(pk) then
+        nxt.text = head .. " No spare " .. kind_label(pk) .. " yet: a new one will be founded near your network soon."
+      else
+        nxt.text = head .. " No spare " .. kind_label(pk) .. " yet: one may be founded later."
+      end
+    end
+  end
+
+  return { rows = rows, towns = towns, next = nxt, window = window, spare = spare }
+end
+
 gui = require("scripts.gui")
 gui.init(M)
 
@@ -2159,6 +2471,27 @@ remote.add_interface("freight_dispatch", {
     log("FDDUMP wagons-table-size " .. table_size(storage.wagons))
   end,
   contracts = function() return storage.contracts end,
+  -- Supply chain analysis as plain data (dev hook)
+  chain = function()
+    local ch = M.supply_chain()
+    local rows = {}
+    local function nm(s) return s and s.name or nil end
+    for it, r in pairs(ch.rows) do
+      local prods, cons = {}, {}
+      for _, p in ipairs(r.producers) do
+        table.insert(prods, string.format("%s %.1f/s busy=%s starve=%s full=%.2f svc=%s", p.site.name, p.rate,
+          tostring(p.busy and string.format("%.2f", p.busy)), tostring(p.starve and string.format("%.2f", p.starve)),
+          p.full, tostring(p.service and string.format("%.2f", p.service))))
+      end
+      for _, c in ipairs(r.consumers) do
+        table.insert(cons, string.format("%s %s want=%.1f got=%.1f short=%.2f", c.site.name, c.role, c.wanted, c.got, c.short))
+      end
+      rows[it] = { status = r.status, cause = r.cause, why = r.why, cause_item = r.cause_item, made = r.made, got = r.got,
+        wanted = r.wanted, who = nm(r.who), from = nm(r.from), sev = r.sev, producers = prods, consumers = cons }
+    end
+    return { next = ch.next.text, rows = rows, window = ch.window, towns = { n = ch.towns.n, growing = #ch.towns.growing,
+      full = #ch.towns.full, pax = ch.towns.pax, mail = ch.towns.mail } }
+  end,
   stats = function()
     return { money = storage.money, lifetime = storage.lifetime, sites = table_size(storage.sites),
       contracts = #storage.contracts, deliveries = storage.deliveries or 0, fuel_spent = storage.fuel_spent or 0 }

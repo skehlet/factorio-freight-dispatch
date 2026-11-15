@@ -1,4 +1,4 @@
-﻿-- Save inspector for Freight Dispatch. NOT for players.
+-- Save inspector for Freight Dispatch. NOT for players.
 -- Added to a COPY of the user's save. on_init runs when it is "added" to the save:
 --   1. calls the mod's debug_dump remote (FDDUMP lines: every train's schedule, wagons,
 --      per-lot cargo records, stops and their linked sites, towns' stock, contracts)
@@ -103,6 +103,18 @@ script.on_nth_tick(60, function()
   for id, s in pairs(cols) do k = k + 1; if k <= 6 then log("FDBAL color train " .. id .. ": " .. s) end end
   local f = game.forces.player
   log("FDBAL circuit tech=" .. tostring(f.technologies["circuit-network"].researched) .. " decider recipe=" .. tostring(f.recipes["decider-combinator"].enabled) .. " box recipe=" .. tostring(f.recipes["fd-site-signals"].enabled) .. " rail recipe=" .. tostring(f.recipes["rail"].enabled) .. " fd-decider recipe=" .. tostring(f.recipes["fd-decider"].enabled))
+end)
+
+
+-- supply chain report at 3 min and 11 min after load
+-- (own tick interval: a second on_nth_tick(60) would replace the balance report above)
+script.on_nth_tick(1800, function()
+  local t = game.tick - (storage.start or 0)
+  for _, at in pairs({ 3 * 3600, 11 * 3600 }) do
+    if t >= at and t - 1800 < at then
+      log("FDCHAIN at +" .. math.floor(t / 60) .. "s\n" .. serpent.block(remote.call("freight_dispatch", "chain")))
+    end
+  end
 end)
 
 script.on_nth_tick(600, function()

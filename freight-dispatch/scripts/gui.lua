@@ -19,6 +19,8 @@ You run a railway. Towns and industries sit inside coloured rings across the map
 
 Whenever fewer than 6 sites are unserved, a new one is founded 200-500 tiles from your network and announced in chat. New sites fill the supply chain from the bottom up: first a coal mine and lumber camp you haven't connected yet, then an iron mine and power plant, then a town, then a steel mill, then a factory. A missing coal mine, lumber camp, iron mine, power plant or town is founded even when 6 sites are already waiting. Contracts only name places you already serve.
 
+[font=default-bold]Supply chain window[/font] (HUD button) shows, for each cargo, what your served sites made, delivered and could use per second over the last 10 minutes, and whether anything runs short. [color=#ff6060]SHORT[/color] says why: not enough made, held back by an earlier cargo, a producer at full speed, or pickups that can't keep up (a full pile, or a site not visited every minute). [color=yellow]BACKED UP[/color] means a pile keeps filling up. "Next step" names the one fix that helps most, often a spare site to connect.
+
 [font=default-bold]Sites[/font]
 [item=fd-passengers] [font=default-bold]Town[/font]
   Helped by: [item=fd-goods] goods (the only way to grow), power
@@ -50,7 +52,7 @@ Each level adds the base output again (mines) or 50 more processed per second (m
 - Rails: straight $50, diagonal $100, curve $150. Deconstruction refunds 75%. The upgrade planner swaps rail and chain signals.
 - Locomotives refuel themselves at your expense. Idle trains cost nothing.
 - Trains and stops reveal the map around them. A Land survey (Shop) reveals the area you're looking at.
-- Click a name in the Sites list or a contract to view it. Shift+click to travel there.
+- Click a site in the Supply chain window or a contract to view it. Shift+click to travel there.
 
 [font=default-bold]Signals[/font]
 Rail signal: one train per block, place it where trains should wait. Chain signal: at junction entries and inside junctions, with a rail signal at each exit, so trains never stop inside a junction.
@@ -84,7 +86,7 @@ function G.build_hud(player)
   f.add({ type = "line" })
   local b = f.add({ type = "flow", name = "buttons", direction = "horizontal" })
   b.add({ type = "button", caption = "Shop", tags = { fd = "shop" } })
-  b.add({ type = "button", caption = "Sites", tags = { fd = "sites" } })
+  b.add({ type = "button", caption = "Supply chain", tags = { fd = "sites" } })
   b.add({ type = "button", caption = "Help", tags = { fd = "help" } })
   G.update(player)
 end
@@ -207,39 +209,178 @@ local function build_shop(player)
   })
 end
 
-local function build_sites(player)
-  local f = open_window(player, "fd_sites", "Towns and industries")
+-- Supply chain window (0.5.0, replaces the old Sites list, which Steve found too noisy).
+-- Every site name is a button: click to view it, shift+click to travel there.
+-- Column widths, shared by every block so the columns line up down the whole window.
+local COL_ROLE, COL_SITE, COL_RATE = 50, 250, 80
+local HEAD = { 150, 120, 150, 140 } -- cargo name, made, delivered, wanted (0.5.2: was 300 wide, too far right)
+
+local function site_button(parent, s, width)
+  local tip = M.site_status(s)
+  local detail = M.site_detail(s)
+  if detail then tip = tip .. "\n" .. detail end
+  local b = parent.add({
+    type = "button", caption = M.site_title(s), tags = { fd = "goto", site = s.id },
+    tooltip = tip .. "\n[color=gray]Click: view on map.  Shift+click: travel there.[/color]",
+  })
+  b.style.height = 26
+  b.style.left_padding = 6
+  b.style.right_padding = 6
+  b.style.font = "default"
+  if width then
+    b.style.width = width
+    b.style.horizontal_align = "left"
+  end
+  return b
+end
+
+local function cell(parent, caption, width, right)
+  local l = parent.add({ type = "label", caption = caption })
+  if width then l.style.width = width end
+  if right then l.style.horizontal_align = "right" end
+  return l
+end
+
+-- a 4-column table: role | site button | rate | note
+local function site_table(parent)
+  local t = parent.add({ type = "table", column_count = 4 })
+  t.style.horizontal_spacing = 10
+  t.style.vertical_spacing = 2
+  t.style.left_margin = 8
+  return t
+end
+
+local function site_row(t, role, s, rate_text, note)
+  cell(t, role, COL_ROLE)
+  site_button(t, s, COL_SITE)
+  cell(t, rate_text, COL_RATE, true)
+  cell(t, note or "")
+end
+
+local function rate(n)
+  if n > 0 and n < 10 then return string.format("%.1f", n) end
+  return M.fmt(n)
+end
+
+local function cause_text(r)
+  if r.status == "measuring" then return "[color=gray]measuring...[/color]" end
+  if r.status == "ok" then return "[color=green]OK[/color]" end
+  if r.status == "unused" then return "[color=gray]nothing connected uses it[/color]" end
+  if r.status == "backed" then return "[color=yellow]BACKED UP[/color]: a pile keeps filling, needs more pickups" end
+  if r.status ~= "short" then return "" end
+  local why = ({
+    none = "nothing connected makes it",
+    production = "not enough made",
+    capacity = "producer at full speed",
+    pickup = r.why == "service" and "irregular pickups" or r.why == "full" and "not picked up fast enough" or "trains don't carry enough",
+    upstream = r.cause_item and ("held back by [item=" .. r.cause_item .. "]") or "held back",
+  })[r.cause] or ""
+  return "[color=#ff6060]SHORT[/color]: " .. why
+end
+
+local function pct(f) return math.floor(f * 100 + 0.5) .. "%" end
+
+local function build_chain(player)
+  local f = open_window(player, "fd_sites", "Supply chain")
   if not f then return end
+  local ch = M.supply_chain()
   local sp = f.add({ type = "scroll-pane", direction = "vertical" })
-  sp.style.maximal_height = 600
-  sp.style.minimal_width = 640
-  local t = sp.add({ type = "table", column_count = 3 })
-  t.style.horizontal_spacing = 16
-  t.add({ type = "label", caption = "[font=default-bold]Site (click to view on map)[/font]" })
-  t.add({ type = "label", caption = "[font=default-bold]Status[/font]" })
-  t.add({ type = "label", caption = "[font=default-bold]Distance[/font]" })
-  local pos = player.position
-  local list = {}
-  for _, s in pairs(storage.sites) do
-    local dx, dy = s.x - pos.x, s.y - pos.y
-    table.insert(list, { s = s, d = math.sqrt(dx * dx + dy * dy) })
+  sp.style.maximal_height = 680
+  sp.style.minimal_width = 720
+
+  -- next step
+  local nf = sp.add({ type = "frame", style = "inside_shallow_frame_with_padding", direction = "vertical" })
+  nf.style.horizontally_stretchable = true
+  local nl = nf.add({ type = "label", caption = "[font=default-bold]Next step:[/font] " .. ch.next.text })
+  nl.style.single_line = false
+  nl.style.maximal_width = 680
+  if #ch.next.sites > 0 then
+    local fl = nf.add({ type = "flow", direction = "horizontal" })
+    for _, id in ipairs(ch.next.sites) do
+      if storage.sites[id] then site_button(fl, storage.sites[id]) end
+    end
   end
-  table.sort(list, function(a, b) return a.d < b.d end)
-  for i, e in ipairs(list) do
-    if i > 100 then break end
-    local s = e.s
-    local btn = t.add({
-      type = "button", caption = "[item=" .. C.KINDS[s.kind].icon .. "] " .. M.site_title(s),
-      tags = { fd = "goto", site = s.id }, tooltip = "Click: view on map.  Shift+click: travel there.",
-    })
-    btn.style.horizontal_align = "left"
-    btn.style.minimal_width = 230
-    local detail = M.site_detail(s)
-    local st = t.add({ type = "label", caption = M.site_status(s) .. (detail and ("\n[color=#d8d8b0]" .. detail .. "[/color]") or "") })
-    st.style.single_line = false
-    t.add({ type = "label", caption = M.fmt(e.d) .. " tiles" })
+
+  local measuring = ch.window < 120
+
+  -- block header: cargo name, made, delivered, wanted, status (fixed widths so they line up)
+  local function header(caption, made, got, wanted, status)
+    local head = sp.add({ type = "flow", direction = "horizontal" })
+    head.style.horizontal_spacing = 0
+    cell(head, caption, HEAD[1])
+    cell(head, made, HEAD[2])
+    cell(head, got, HEAD[3])
+    cell(head, wanted or "", HEAD[4])
+    cell(head, status or "")
   end
-  f.add({ type = "label", caption = "[color=gray]A new site is founded near your network whenever fewer than " .. C.SPARE_SITES_MIN .. " are left unserved.[/color]" })
+
+  -- one block per freight cargo
+  for _, it in ipairs(M.CHAIN_ITEMS) do
+    local r = ch.rows[it]
+    if #r.producers > 0 or #r.consumers > 0 then
+      sp.add({ type = "line" })
+      header("[item=" .. it .. "] [font=default-bold]" .. C.CARGO[it].label .. "[/font]",
+        "made " .. rate(r.made) .. "/s", "delivered " .. rate(r.got) .. "/s",
+        r.wanted > 0 and ("wanted " .. rate(r.wanted) .. "/s") or nil, cause_text(r))
+      local t = site_table(sp)
+      for i, p in ipairs(r.producers) do
+        local notes = {}
+        if p.busy then table.insert(notes, "busy " .. pct(p.busy)) end
+        if not measuring and p.full > 0.15 then table.insert(notes, "[color=yellow]pile full " .. pct(p.full) .. "[/color]") end
+        if p.service and p.service < 0.85 then table.insert(notes, string.format("[color=yellow]service x%.2f[/color]", p.service)) end
+        site_row(t, i == 1 and "From" or "", p.site, rate(p.rate) .. "/s", table.concat(notes, ", "))
+      end
+      if it == "fd-goods" then
+        local n = #ch.towns.growing
+        local first = true
+        for _, c in ipairs(r.consumers) do
+          local grows = false
+          for _, s in ipairs(ch.towns.growing) do if s == c.site then grows = true end end
+          site_row(t, first and "To" or "", c.site, rate(c.got) .. "/s", grows and "[color=green]growing[/color]" or "[color=gray]stable[/color]")
+          first = false
+        end
+      else
+        for i, c in ipairs(r.consumers) do
+          local notes = {}
+          if c.role == "booster" then table.insert(notes, "boost") end
+          if c.role == "fuel" then table.insert(notes, "fuel") end
+          if not measuring and c.short > C.CHAIN_SHORT then
+            table.insert(notes, "[color=#ff6060]" .. (c.role == "fuel" and "dry " or "short ") .. pct(c.short) .. " of the time[/color]")
+          end
+          site_row(t, i == 1 and "To" or "", c.site, rate(c.got) .. "/s", table.concat(notes, ", "))
+        end
+      end
+    end
+  end
+
+  -- towns: passengers and mail summary
+  local tw = ch.towns
+  if tw.n > 0 then
+    sp.add({ type = "line" })
+    header("[item=fd-passengers] [font=default-bold]Passengers[/font]", "made " .. rate(tw.pax.made) .. "/s",
+      "delivered " .. rate(tw.pax.got) .. "/s", "carried " .. rate(tw.pax.carried) .. "/s")
+    header("[item=fd-mail] [font=default-bold]Mail[/font]", "made " .. rate(tw.mail.made) .. "/s",
+      "delivered " .. rate(tw.mail.got) .. "/s", "carried " .. rate(tw.mail.carried) .. "/s")
+    if #tw.full > 0 and not measuring then
+      local t = site_table(sp)
+      for i, s in ipairs(tw.full) do
+        site_row(t, i == 1 and "Full" or "", s, "", "[color=yellow]passengers piling up: more trains[/color]")
+      end
+    end
+  end
+
+  -- footer
+  sp.add({ type = "line" })
+  local parts = {}
+  for _, k in ipairs(C.KIND_ORDER) do
+    local n = ch.spare[k] or 0
+    if n > 0 then table.insert(parts, n .. " [item=" .. C.KINDS[k].icon .. "] " .. C.KINDS[k].label:lower()) end
+  end
+  local mins = math.max(1, math.floor(ch.window / 60 + 0.5))
+  local foot = sp.add({ type = "label", caption = "[color=gray]Averages over the last " .. mins .. " min. Hover a site for its details." ..
+    (#parts > 0 and ("\nSpare (unserved) sites: " .. table.concat(parts, ", ")) or "") .. "[/color]" })
+  foot.style.single_line = false
+  foot.style.maximal_width = 680
 end
 
 local function build_help(player)
@@ -300,7 +441,7 @@ script.on_event(defines.events.on_gui_click, function(e)
   local player = game.get_player(e.player_index)
   local a = tags.fd
   if a == "shop" then build_shop(player)
-  elseif a == "sites" then build_sites(player)
+  elseif a == "sites" then build_chain(player)
   elseif a == "help" then build_help(player)
   elseif a == "close" then
     local w = player.gui.screen[tags.win]

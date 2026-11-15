@@ -35,6 +35,10 @@ C.FOUND_TIERS = {
   { kinds = { "factory" } },
 }
 C.STUCK_TICKS = 3 * 60 * 60
+-- Supply chain window (0.5.0): rates are averages over the last FLOW_MINUTES minutes. A consumer
+-- counts as short when it spends more than CHAIN_SHORT of its time short of an input.
+C.FLOW_MINUTES = 10
+C.CHAIN_SHORT = 0.10
 C.TRAIN_SIGHT = 64         -- tiles revealed around each train (refreshed every 2 s)
 C.STOP_SIGHT = 48          -- tiles kept live around each train stop (every 10 s)
 C.SURVEY_PRICE = 5000      -- Shop "Land survey"
