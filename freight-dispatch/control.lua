@@ -718,6 +718,23 @@ local function room_for_site()
 end
 M.room_for_site = room_for_site
 
+-- The supply chain's next need: the lowest FOUND_TIERS tier with a kind that has no unserved
+-- site to connect. Returns that kind (random among the tier's gaps) and whether it's basic.
+local function urgent_kind(served)
+  local spare = {}
+  for id, s in pairs(storage.sites) do
+    if not served[id] then spare[s.kind] = true end
+  end
+  for _, tier in ipairs(C.FOUND_TIERS) do
+    local gaps = {}
+    for _, kind in ipairs(tier.kinds) do
+      if not spare[kind] then table.insert(gaps, kind) end
+    end
+    if #gaps > 0 then return pick(gaps), tier.basic or false end
+  end
+  return nil
+end
+
 -- What to found next: a kind missing from the whole map if there is one, otherwise a weighted
 -- pick that avoids kinds already waiting unserved (so the spare sites stay varied).
 local function pick_found_kind(served)
@@ -763,7 +780,8 @@ local function found_site()
   end
   table.sort(anchors, function(p, q) return p.id < q.id end) -- pairs order isn't stable
   if #anchors == 0 then anchors = { { x = 0, y = 0 } } end
-  local kind = storage.found_kind or pick_found_kind(served)
+  -- a supply-chain gap wins over a kind picked earlier that couldn't be placed yet
+  local kind = urgent_kind(served) or storage.found_kind or pick_found_kind(served)
   storage.found_kind = kind
   -- a power plant goes where it would cover the most sites no plant covers yet (fuelled or
   -- not; your served ones count double), so there's usually a good one to connect. Anything
@@ -825,7 +843,10 @@ M.found_site = found_site
 
 local function maybe_found_site()
   if game.tick < (storage.next_found_tick or 0) then return end
-  if not room_for_site() then return end
+  if not room_for_site() then
+    local _, basic = urgent_kind(served_ids())
+    if not basic then return end -- cap full, but a missing raw material is still founded
+  end
   if found_site() then storage.next_found_tick = game.tick + C.FOUND_GAP end
 end
 
@@ -885,7 +906,7 @@ local function site_signals(s)
   local function add(type, name, v)
     v = math.floor(v or 0)
     if v > 0 then
-      table.insert(list, { value = { type = type, name = name, quality = type == "item" and "normal" or nil }, min = math.min(v, 2000000000) })
+      table.insert(list, { value = { type = type, name = name, quality = "normal" }, min = math.min(v, 2000000000) })
     end
   end
   local kind = C.KINDS[s.kind]
@@ -2077,7 +2098,14 @@ remote.add_interface("freight_dispatch", {
   served = function()
     local n = 0
     for _ in pairs(served_ids()) do n = n + 1 end
-    return { served = n, room = room_for_site() }
+    local kinds = {}
+    for id, s in pairs(storage.sites) do
+      local k = kinds[s.kind] or { served = 0, spare = 0 }
+      if served_ids()[id] then k.served = k.served + 1 else k.spare = k.spare + 1 end
+      kinds[s.kind] = k
+    end
+    local uk, basic = urgent_kind(served_ids())
+    return { served = n, room = room_for_site(), kinds = kinds, urgent = uk, basic = basic }
   end,
   debug_dump = function()
     local out = {}

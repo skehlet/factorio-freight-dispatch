@@ -23,6 +23,17 @@ C.SPARE_SITES_RATIO = 0.5
 C.FOUND_MIN = 200
 C.FOUND_MAX = 500
 C.FOUND_GAP = 30 * 60
+-- Supply-chain order for founding (0.4.6, Steve asked: he had spare iron, steel and factories
+-- but no lumber camp to connect). The first tier with a kind that has no unserved site gets
+-- that kind next. Tiers marked `basic` are founded even when the spare-site cap is full, so
+-- the raw materials are always on offer. Once every tier has a spare, the weighted pick runs.
+C.FOUND_TIERS = {
+  { kinds = { "coal-mine", "forest" }, basic = true },
+  { kinds = { "iron-mine", "power-plant" }, basic = true },
+  { kinds = { "town" }, basic = true }, -- 0.4.7: always one town to connect (Steve: towns felt scarce)
+  { kinds = { "steel-mill" } },
+  { kinds = { "factory" } },
+}
 C.STUCK_TICKS = 3 * 60 * 60
 C.TRAIN_SIGHT = 64         -- tiles revealed around each train (refreshed every 2 s)
 C.STOP_SIGHT = 48          -- tiles kept live around each train stop (every 10 s)

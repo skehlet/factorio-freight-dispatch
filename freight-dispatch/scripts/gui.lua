@@ -17,16 +17,32 @@ You run a railway. Towns and industries sit inside coloured rings across the map
 [font=default-bold]4. Grow.[/font] Industries level up as you ship from them. Towns grow only from goods. More output means more trains, so signalling matters.
 [font=default-bold]5. Upgrade.[/font] The Shop sells fuel, bigger wagons, faster station crews and running shoes. Each applies to every train.
 
-Whenever fewer than 6 sites are unserved, a new one is founded 200-500 tiles from your network and announced in chat. Contracts only name places you already serve.
+Whenever fewer than 6 sites are unserved, a new one is founded 200-500 tiles from your network and announced in chat. New sites fill the supply chain from the bottom up: first a coal mine and lumber camp you haven't connected yet, then an iron mine and power plant, then a town, then a steel mill, then a factory. A missing coal mine, lumber camp, iron mine, power plant or town is founded even when 6 sites are already waiting. Contracts only name places you already serve.
 
 [font=default-bold]Sites[/font]
-[item=fd-passengers] [font=default-bold]Town[/font]  Needs: nothing. Helped by: [item=fd-goods] goods (the only way to grow), power. Makes: [item=fd-passengers] passengers and [item=fd-mail] mail for other towns, more as it grows.
-[item=fd-coal] [font=default-bold]Coal Mine[/font]  Needs: nothing. Helped by: regular pickups, levels, power. Makes: [item=fd-coal] coal for steel mills and power plants.
-[item=fd-iron-ore] [font=default-bold]Iron Mine[/font]  Needs: nothing. Helped by: regular pickups, levels, power. Makes: [item=fd-iron-ore] iron ore for steel mills.
-[item=fd-wood] [font=default-bold]Lumber Camp[/font]  Needs: nothing. Helped by: regular pickups, levels, power. Makes: [item=fd-wood] lumber for factories and power plants.
-[item=fd-steel] [font=default-bold]Steel Mill[/font]  Needs: [item=fd-iron-ore] iron ore. Helped by: [item=fd-coal] coal (up to x2 with half a coal per ore), levels, power. Makes: [item=fd-steel] steel for factories.
-[item=fd-goods] [font=default-bold]Factory[/font]  Needs: [item=fd-steel] steel. Helped by: [item=fd-wood] lumber (up to x2 with half a lumber per steel), levels, power. Makes: [item=fd-goods] goods for towns.
-[item=fd-coal] [font=default-bold]Power Plant[/font]  Needs: [item=fd-coal] coal or [item=fd-wood] lumber (worth half). Burns 15 a second, holds 20 minutes. Makes: power, +25% for every site in its circle (250 tiles, wider each level). One plant per site, so spread them out.
+[item=fd-passengers] [font=default-bold]Town[/font]
+  Helped by: [item=fd-goods] goods (the only way to grow), power
+  Makes: [item=fd-passengers] passengers and [item=fd-mail] mail for other towns, more as it grows
+[item=fd-coal] [font=default-bold]Coal Mine[/font]
+  Helped by: regular pickups, levels, power
+  Makes: [item=fd-coal] coal for steel mills and power plants
+[item=fd-iron-ore] [font=default-bold]Iron Mine[/font]
+  Helped by: regular pickups, levels, power
+  Makes: [item=fd-iron-ore] iron ore for steel mills
+[item=fd-wood] [font=default-bold]Lumber Camp[/font]
+  Helped by: regular pickups, levels, power
+  Makes: [item=fd-wood] lumber for factories and power plants
+[item=fd-steel] [font=default-bold]Steel Mill[/font]
+  Needs: [item=fd-iron-ore] iron ore
+  Helped by: [item=fd-coal] coal (up to x2 with half a coal per ore), levels, power
+  Makes: [item=fd-steel] steel for factories
+[item=fd-goods] [font=default-bold]Factory[/font]
+  Needs: [item=fd-steel] steel
+  Helped by: [item=fd-wood] lumber (up to x2 with half a lumber per steel), levels, power
+  Makes: [item=fd-goods] goods for towns
+[item=fd-coal] [font=default-bold]Power Plant[/font]
+  Needs: [item=fd-coal] coal or [item=fd-wood] lumber (worth half). Burns 15 a second, holds 20 minutes
+  Makes: power, +25% for every site in its circle (250 tiles, wider each level). One plant per site, so spread them out
 Each level adds the base output again (mines) or 50 more processed per second (mills, factories). Mines make less ("service") until trains pick up regularly. Input piles hold 20,000: when full, trains keep the rest aboard, and a full output pile pauses the site. Nothing is wasted.
 
 [font=default-bold]Building[/font]
