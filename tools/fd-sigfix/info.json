@@ -1,0 +1,9 @@
+{
+  "name": "fd-sigfix",
+  "version": "0.1.0",
+  "title": "Freight Dispatch: one-off signal fix (dev tool)",
+  "author": "dev",
+  "factorio_version": "2.1",
+  "dependencies": ["base", "freight-dispatch"],
+  "description": "Run on a headless server copy of a save: turns junction exit rail signals with too little room after them into chain signals, then saves as fd-sigfixed."
+}

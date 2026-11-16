@@ -133,3 +133,418 @@ end)
 script.on_nth_tick(600, function()
   snap("+" .. math.floor((game.tick - (storage.start or 0)) / 60) .. "s")
 end)
+
+-- Signal scanner (one-off): for each rail signal, measure the block a train enters after
+-- passing it (to the next signal facing the same way). Short blocks mean a train stopped at
+-- the next signal sticks out back past this one.
+local function sig_at(surf, loc)
+  if not loc then return nil end
+  for _, s in pairs(surf.find_entities_filtered({ position = loc.position, radius = 0.3, type = { "rail-signal", "rail-chain-signal" } })) do
+    if s.direction == loc.direction then return s end
+  end
+end
+
+-- Convention (checked on Steve's save): a signal sits at a rail end's in_signal_location and
+-- guards trains entering that rail through that end.
+local function in_sig(surf, re)
+  return sig_at(surf, re.in_signal_location) or sig_at(surf, re.alternative_in_signal_location)
+end
+
+local CONN = { defines.rail_connection_direction.straight, defines.rail_connection_direction.left, defines.rail_connection_direction.right }
+
+-- re: end of the first rail past the signal, pointing in the direction of travel
+local function walk(surf, re0)
+  local re = re0.make_copy()
+  local len, branch, stop = re.rail.rail_length, false, nil
+  for _ = 1, 400 do
+    local n = 0
+    for _, c in pairs(CONN) do
+      if re.rail.get_connected_rail({ rail_direction = re.direction, rail_connection_direction = c }) then n = n + 1 end
+    end
+    if n == 0 then return len, "dead end", branch, stop end
+    if n > 1 then branch = true end
+    local st = re.rail.get_rail_segment_stop(re.direction)
+    if st and not stop then stop = st.backer_name end
+    if not re.move_natural() then return len, "dead end", branch, stop end
+    local near = re.make_copy()
+    near.flip_direction()
+    local s = in_sig(surf, near)
+    if s then return len, s, branch, stop end
+    len = len + re.rail.rail_length
+    if len > 400 then return len, "far", branch, stop end
+  end
+  return len, "far", branch, stop
+end
+SIG_WALK = walk
+SIG_IN = in_sig
+
+function SIGSCAN()
+  local surf = game.surfaces["freight"]
+  local maxcars = 0
+  for _, t in pairs(game.train_manager.get_trains({ surface = surf })) do maxcars = math.max(maxcars, #t.carriages) end
+  local sigs = surf.find_entities_filtered({ type = "rail-signal" })
+  local nfound, nshort = 0, 0
+  log("FDSIG scanning " .. #sigs .. " rail signals, " .. #surf.find_entities_filtered({ type = "rail-chain-signal" }) .. " chain signals, longest train " .. maxcars .. " carriages")
+  for _, s in pairs(sigs) do
+    local found
+    for _, r in pairs(s.get_connected_rails()) do
+      for _, d in pairs({ defines.rail_direction.front, defines.rail_direction.back }) do
+        local re = r.get_rail_end(d)
+        if not found and in_sig(surf, re) == s then
+          found = r.get_rail_end(d == defines.rail_direction.front and defines.rail_direction.back or defines.rail_direction.front)
+        end
+      end
+    end
+    if found then
+      nfound = nfound + 1
+      local len, nxt, branch, stop = walk(surf, found)
+      if len < 45 then
+        nshort = nshort + 1
+        log(string.format("FDSIG short %.1f tiles: signal at %.1f,%.1f dir=%d -> %s%s%s", len, s.position.x, s.position.y, s.direction,
+          type(nxt) == "string" and nxt or (nxt.type .. " at " .. nxt.position.x .. "," .. nxt.position.y),
+          branch and " (branch in block)" or "", stop and (" stop=" .. stop) or ""))
+      end
+    else
+      log("FDSIG no rail end for signal at " .. s.position.x .. "," .. s.position.y)
+    end
+  end
+  log("FDSIG done: matched " .. nfound .. ", short " .. nshort)
+end
+
+script.on_nth_tick(301, function()
+  if storage.sig_scanned then return end
+  storage.sig_scanned = true
+  SIGSCAN()
+end)
+
+script.on_nth_tick(307, function()
+  if storage.sig_dbg then return end
+  storage.sig_dbg = true
+  local surf = game.surfaces["freight"]
+  local s = surf.find_entities_filtered({ position = { -900.5, 77.5 }, radius = 0.5, type = "rail-signal" })[1]
+  log("FDSIGDBG signal pos=" .. serpent.line(s.position) .. " dir=" .. s.direction .. " layer=" .. tostring(s.rail_layer))
+  for _, r in pairs(s.get_connected_rails()) do
+    for _, d in pairs({ defines.rail_direction.front, defines.rail_direction.back }) do
+      local re = r.get_rail_end(d)
+      log("FDSIGDBG rail " .. r.name .. " " .. serpent.line(r.position) .. " end " .. d .. " in=" .. serpent.line(re.in_signal_location) ..
+        " out=" .. serpent.line(re.out_signal_location) .. " altin=" .. serpent.line(re.alternative_in_signal_location) .. " altout=" .. serpent.line(re.alternative_out_signal_location))
+    end
+  end
+end)
+
+-- refined scan: junction exits only, compared with real train lengths
+function SIGSCAN2()
+  local surf = game.surfaces["freight"]
+  -- train length in tiles: distance between the outer ends of the front and back carriages
+  local function tlen(t)
+    local f, b = t.front_stock, t.back_stock
+    local dx, dy = f.position.x - b.position.x, f.position.y - b.position.y
+    local along = 0
+    for i = 2, #t.carriages do
+      local a, c = t.carriages[i - 1].position, t.carriages[i].position
+      along = along + math.sqrt((a.x - c.x) ^ 2 + (a.y - c.y) ^ 2)
+    end
+    return along + 6 -- plus half a carriage at each end (about 3 tiles each)
+  end
+  local maxlen, maxcars = 0, 0
+  local station_len = {}
+  for _, t in pairs(game.train_manager.get_trains({ surface = surf })) do
+    local L = tlen(t)
+    if L > maxlen then maxlen, maxcars = L, #t.carriages end
+    local ok, sch = pcall(function() return t.get_schedule() end)
+    if ok and sch then
+      for i = 1, sch.get_record_count() do
+        local r = sch.get_record({ schedule_index = i })
+        if r and r.station then station_len[r.station] = math.max(station_len[r.station] or 0, L) end
+      end
+    end
+  end
+  log(string.format("FDSIG2 longest train %d carriages = %.1f tiles", maxcars, maxlen))
+  local flagged = 0
+  local list = {}
+  for _, s in pairs(surf.find_entities_filtered({ type = "rail-signal" })) do
+    for _, r in pairs(s.get_connected_rails()) do
+      for _, d in pairs({ defines.rail_direction.front, defines.rail_direction.back }) do
+        local E = r.get_rail_end(d)
+        if SIG_IN(surf, E) == s then
+          local after = r.get_rail_end(d == defines.rail_direction.front and defines.rail_direction.back or defines.rail_direction.front)
+          local len, nxt, branch, stop = SIG_WALK(surf, after)
+          -- the block behind: a rail connected at E
+          local junction = false
+          for _, c in pairs({ defines.rail_connection_direction.straight, defines.rail_connection_direction.left, defines.rail_connection_direction.right }) do
+            local prev = r.get_connected_rail({ rail_direction = d, rail_connection_direction = c })
+            if prev then
+              for _, ib in pairs(prev.get_inbound_signals()) do
+                if ib.type == "rail-chain-signal" then junction = true end
+              end
+            end
+          end
+          local need = maxlen
+          if stop and nxt == "dead end" then need = station_len[stop] or maxlen end
+          local entry = string.format("%.1f tiles after, needs %.1f: signal at %.1f,%.1f -> %s%s%s%s", len, need, s.position.x, s.position.y,
+            type(nxt) == "string" and nxt or (nxt.type .. " at " .. nxt.position.x .. "," .. nxt.position.y),
+            branch and " (branch)" or "", stop and (" stop=" .. stop) or "", junction and " JUNCTION-EXIT" or "")
+          if len < need then
+            if junction then flagged = flagged + 1; log("FDSIG2 BAD " .. entry) else log("FDSIG2 short-but-not-exit " .. entry) end
+          end
+        end
+      end
+    end
+  end
+  log("FDSIG2 done: flagged " .. flagged)
+end
+
+script.on_nth_tick(313, function()
+  if storage.sig_scanned2 then return end
+  storage.sig_scanned2 = true
+  SIGSCAN2()
+end)
+
+script.on_nth_tick(317, function()
+  if storage.sig_dump then return end
+  storage.sig_dump = true
+  local surf = game.surfaces["freight"]
+  for i, p in pairs({ { -73.5, -260.5 }, { 215.5, 88.5 }, { 624.5, 333.5 }, { 449.5, 534.5 }, { 73.5, -17.5 }, { 226.5, 53.5 } }) do
+    local out = {}
+    for _, e in pairs(surf.find_entities_filtered({ position = p, radius = 70, type = { "straight-rail", "curved-rail-a", "curved-rail-b", "half-diagonal-rail", "rail-signal", "rail-chain-signal", "train-stop" } })) do
+      table.insert(out, string.format("%s,%.1f,%.1f,%d", e.type, e.position.x, e.position.y, e.direction))
+    end
+    log("FDDUMPAREA " .. i .. " " .. p[1] .. " " .. p[2] .. " " .. table.concat(out, ";"))
+  end
+end)
+
+-- scan 3: rail segment API (exact). For each rail signal: the segment starting just past it,
+-- its length, and what ends it in the direction of travel.
+function SIGSCAN3(fix)
+  local surf = game.surfaces["freight"]
+  local OPP = { [defines.rail_direction.front] = defines.rail_direction.back, [defines.rail_direction.back] = defines.rail_direction.front }
+  local res = {}
+  for _, s in pairs(surf.find_entities_filtered({ type = "rail-signal" })) do
+    for _, r in pairs(s.get_connected_rails()) do
+      for _, d in pairs({ defines.rail_direction.front, defines.rail_direction.back }) do
+        if SIG_IN(surf, r.get_rail_end(d)) == s then
+          local t = OPP[d]
+          local L = r.get_rail_segment_length()
+          local endrail, enddir = r.get_rail_segment_end(t)
+          local nsig = r.get_rail_segment_signal(t, true)
+          local stop = r.get_rail_segment_stop(t)
+          local nbranch = 0
+          for _, c in pairs({ defines.rail_connection_direction.straight, defines.rail_connection_direction.left, defines.rail_connection_direction.right }) do
+            if endrail.get_connected_rail({ rail_direction = enddir, rail_connection_direction = c }) then nbranch = nbranch + 1 end
+          end
+          -- what is behind the signal: is that block a junction (entered through a chain signal)?
+          local junction = false
+          for _, c in pairs({ defines.rail_connection_direction.straight, defines.rail_connection_direction.left, defines.rail_connection_direction.right }) do
+            local prev = r.get_connected_rail({ rail_direction = d, rail_connection_direction = c })
+            if prev then for _, ib in pairs(prev.get_inbound_signals()) do if ib.type == "rail-chain-signal" then junction = true end end end
+          end
+          table.insert(res, { s = s, L = L, nsig = nsig, stop = stop, nbranch = nbranch, junction = junction })
+        end
+      end
+    end
+  end
+  local short = 0
+  for _, x in ipairs(res) do
+    local endtxt = x.nsig and (x.nsig.type .. " at " .. x.nsig.position.x .. "," .. x.nsig.position.y) or (x.nbranch == 0 and "dead end" or (x.nbranch > 1 and "fork" or "merge/other"))
+    local line = string.format("%.1f  sig %.1f,%.1f -> %s%s%s", x.L, x.s.position.x, x.s.position.y, endtxt,
+      x.stop and (" stop=" .. x.stop.backer_name) or "", x.junction and " EXIT" or "")
+    if x.L < 42 then short = short + 1; log("FDSIG3 short " .. line) end
+  end
+  log("FDSIG3 done: " .. #res .. " signals, " .. short .. " with a segment under 42")
+end
+
+script.on_nth_tick(331, function()
+  if storage.sig_scanned3 then return end
+  storage.sig_scanned3 = true
+  SIGSCAN3()
+end)
+
+-- scan 4: breadth-first over rail connections, every branch. For each rail signal, the nearest
+-- place a train may have to stop after passing it (a same-direction signal or a station).
+local CONNS = { defines.rail_connection_direction.straight, defines.rail_connection_direction.left, defines.rail_connection_direction.right }
+local OPPD = { [defines.rail_direction.front] = defines.rail_direction.back, [defines.rail_direction.back] = defines.rail_direction.front }
+
+function SIGSCAN4(fix)
+  local surf = game.surfaces["freight"]
+  -- train lengths, longest overall and per station
+  local maxlen, station_len = 0, {}
+  for _, t in pairs(game.train_manager.get_trains({ surface = surf })) do
+    local along = 0
+    for i = 2, #t.carriages do
+      local a, c = t.carriages[i - 1].position, t.carriages[i].position
+      along = along + math.sqrt((a.x - c.x) ^ 2 + (a.y - c.y) ^ 2)
+    end
+    local L = along + 6
+    maxlen = math.max(maxlen, L)
+    local ok, sch = pcall(function() return t.get_schedule() end)
+    if ok and sch then
+      for i = 1, sch.get_record_count() do
+        local r = sch.get_record({ schedule_index = i })
+        if r and r.station then station_len[r.station] = math.max(station_len[r.station] or 0, L) end
+      end
+    end
+  end
+  -- stops by the rail they sit on and the direction trains travel to reach them
+  local stops = {}
+  for _, st in pairs(surf.find_entities_filtered({ type = "train-stop" })) do
+    local cr = st.connected_rail
+    if cr then stops[cr.unit_number .. ":" .. st.connected_rail_direction] = st end
+  end
+  -- nearest stopping point after entering `rail`, travelling towards its end `tdir`
+  local function nearest(rail, tdir, limit)
+    local best, bestwhat = math.huge, nil
+    local queue = { { rail = rail, tdir = tdir, dist = rail.rail_length } }
+    local seen = {}
+    local head = 1
+    while queue[head] do
+      local q = queue[head]; head = head + 1
+      local key = q.rail.unit_number .. ":" .. q.tdir
+      if not seen[key] and q.dist < best and q.dist < limit then
+        seen[key] = true
+        local st = stops[q.rail.unit_number .. ":" .. q.tdir] or stops[q.rail.unit_number .. ":" .. OPPD[q.tdir]]
+        if st then
+          local need = station_len[st.backer_name] or maxlen
+          -- a station is only a problem if its trains don't fit
+          if q.dist < need then best, bestwhat = q.dist, st end
+        end
+        local any = false
+        for _, c in pairs(CONNS) do
+          local nr, ndir = q.rail.get_connected_rail({ rail_direction = q.tdir, rail_connection_direction = c })
+          if nr then
+            any = true
+            local sig = SIG_IN(surf, nr.get_rail_end(ndir))
+            if sig then
+              if q.dist < best then best, bestwhat = q.dist, sig end
+            else
+              table.insert(queue, { rail = nr, tdir = OPPD[ndir], dist = q.dist + nr.rail_length })
+            end
+          end
+        end
+      end
+    end
+    return best, bestwhat
+  end
+  local bad = {}
+  local nsig = 0
+  for _, s in pairs(surf.find_entities_filtered({ type = "rail-signal" })) do
+    for _, r in pairs(s.get_connected_rails()) do
+      for _, d in pairs({ defines.rail_direction.front, defines.rail_direction.back }) do
+        if SIG_IN(surf, r.get_rail_end(d)) == s then
+          nsig = nsig + 1
+          local junction = false
+          for _, c in pairs(CONNS) do
+            local prev = r.get_connected_rail({ rail_direction = d, rail_connection_direction = c })
+            if prev then for _, ib in pairs(prev.get_inbound_signals()) do if ib.type == "rail-chain-signal" then junction = true end end end
+          end
+          local dist, what = nearest(r, OPPD[d], maxlen)
+          if junction and dist < maxlen then
+            table.insert(bad, { s = s, dist = dist, what = what })
+          end
+        end
+      end
+    end
+  end
+  log(string.format("FDSIG4 %d rail signals, longest train %.1f tiles, %d junction exits too short", nsig, maxlen, #bad))
+  for _, b in ipairs(bad) do
+    local w = b.what
+    local wired = #(b.s.get_wire_connector(defines.wire_connector_id.circuit_red, false) or { connections = {} }).connections +
+      #(b.s.get_wire_connector(defines.wire_connector_id.circuit_green, false) or { connections = {} }).connections
+    log(string.format("FDSIG4 BAD %.1f tiles: signal at %.1f,%.1f dir=%d -> %s at %.1f,%.1f%s", b.dist, b.s.position.x, b.s.position.y,
+      b.s.direction, w.type == "train-stop" and ("stop " .. w.backer_name) or w.type, w.position.x, w.position.y, wired > 0 and " WIRED" or ""))
+  end
+  return bad
+end
+
+script.on_nth_tick(337, function()
+  if storage.sig_scanned4 then return end
+  storage.sig_scanned4 = true
+  SIGSCAN4()
+end)
+
+-- scan 5: block-based. Shortest forward path from the signal to the edge of its block (any
+-- branch), or to a station in it whose trains don't fit.
+function SIGSCAN5(fix)
+  local surf = game.surfaces["freight"]
+  local maxlen, station_len = 0, {}
+  for _, t in pairs(game.train_manager.get_trains({ surface = surf })) do
+    local along = 0
+    for i = 2, #t.carriages do
+      local a, c = t.carriages[i - 1].position, t.carriages[i].position
+      along = along + math.sqrt((a.x - c.x) ^ 2 + (a.y - c.y) ^ 2)
+    end
+    local L = along + 6
+    maxlen = math.max(maxlen, L)
+    local ok, sch = pcall(function() return t.get_schedule() end)
+    if ok and sch then
+      for i = 1, sch.get_record_count() do
+        local r = sch.get_record({ schedule_index = i })
+        if r and r.station then station_len[r.station] = math.max(station_len[r.station] or 0, L) end
+      end
+    end
+  end
+  local stops = {}
+  for _, st in pairs(surf.find_entities_filtered({ type = "train-stop" })) do
+    if st.connected_rail then stops[st.connected_rail.unit_number] = st end
+  end
+  local function room(rail, tdir)
+    local best, what = math.huge, nil
+    local queue, head, seen = { { rail = rail, tdir = tdir, dist = rail.rail_length } }, 1, {}
+    while queue[head] do
+      local q = queue[head]; head = head + 1
+      local key = q.rail.unit_number .. ":" .. q.tdir
+      if not seen[key] and q.dist < best and q.dist < 200 then
+        seen[key] = true
+        local st = stops[q.rail.unit_number]
+        if st and q.dist < (station_len[st.backer_name] or maxlen) and q.dist < best then best, what = q.dist, st end
+        local any = false
+        for _, c in pairs(CONNS) do
+          local nr, ndir = q.rail.get_connected_rail({ rail_direction = q.tdir, rail_connection_direction = c })
+          if nr then
+            any = true
+            if nr.is_rail_in_same_rail_block_as(q.rail) then
+              table.insert(queue, { rail = nr, tdir = OPPD[ndir], dist = q.dist + nr.rail_length })
+            elseif q.dist < best then
+              best, what = q.dist, nr
+            end
+          end
+        end
+        if not any and not st and q.dist < best then best, what = q.dist, "dead end" end
+      end
+    end
+    return best, what
+  end
+  local bad, nsig = {}, 0
+  for _, s in pairs(surf.find_entities_filtered({ type = "rail-signal" })) do
+    for _, r in pairs(s.get_connected_rails()) do
+      for _, d in pairs({ defines.rail_direction.front, defines.rail_direction.back }) do
+        if SIG_IN(surf, r.get_rail_end(d)) == s then
+          nsig = nsig + 1
+          local junction = false
+          for _, c in pairs(CONNS) do
+            local prev = r.get_connected_rail({ rail_direction = d, rail_connection_direction = c })
+            if prev then for _, ib in pairs(prev.get_inbound_signals()) do if ib.type == "rail-chain-signal" then junction = true end end end
+          end
+          local dist, what = room(r, OPPD[d])
+          if dist < maxlen then
+            table.insert(bad, { s = s, dist = dist, what = what, junction = junction })
+          end
+        end
+      end
+    end
+  end
+  local nbad = 0
+  for _, b in ipairs(bad) do
+    local w = b.what
+    local wt = type(w) == "string" and w or (w.type == "train-stop" and ("stop " .. w.backer_name) or ("block edge at " .. w.position.x .. "," .. w.position.y))
+    if b.junction then nbad = nbad + 1 end
+    log(string.format("FDSIG5 %s %.1f tiles: signal at %.1f,%.1f -> %s", b.junction and "BAD" or "short-not-exit", b.dist, b.s.position.x, b.s.position.y, wt))
+  end
+  log(string.format("FDSIG5 %d rail signals, longest train %.1f tiles, %d junction exits too short", nsig, maxlen, nbad))
+  return bad
+end
+
+script.on_nth_tick(353, function()
+  if storage.sig_scanned5 then return end
+  storage.sig_scanned5 = true
+  SIGSCAN5()
+end)
