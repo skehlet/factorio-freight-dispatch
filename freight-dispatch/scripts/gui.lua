@@ -21,6 +21,8 @@ Whenever fewer than 6 sites are unserved, a new one is founded 200-500 tiles fro
 
 [font=default-bold]Supply chain window[/font] (HUD button) shows, for each cargo, what your served sites made, delivered and could use per second over the last 10 minutes, and whether anything runs short. [color=#ff6060]SHORT[/color] says why: not enough made, held back by an earlier cargo, a producer at full speed, or pickups that can't keep up (a full pile, or a site not visited every minute). [color=yellow]BACKED UP[/color] means a pile keeps filling up. "Next step" names the one fix that helps most, often a spare site to connect.
 
+[font=default-bold]Spaceport (end game)[/font] Reaching the last rank founds a Spaceport. Each rocket needs colonists ([item=fd-passengers] passengers) and [item=fd-mail] mail brought by train (normal fares), and 15 minutes of assembly paid as it goes. Assembly waits whenever paying would take your cash below the reserve you set in the Spaceport window. Every launch adds a satellite: +2% on every fare, up to +50%. The pad levels up after launches 3, 8, 15 and 25: bigger rockets, more colonists, higher cost. Site signals there output [virtual-signal=signal-P] colonists and [virtual-signal=signal-M] mail still needed, [virtual-signal=signal-T] minutes of assembly left and [virtual-signal=signal-C] your cash in $1,000s.
+
 [font=default-bold]Sites[/font]
 [item=fd-passengers] [font=default-bold]Town[/font]
   Helped by: [item=fd-goods] goods (the only way to grow), power
@@ -80,6 +82,7 @@ function G.build_hud(player)
   f.add({ type = "label", name = "rank" })
   local bar = f.add({ type = "progressbar", name = "rank_bar" })
   bar.style.horizontally_stretchable = true
+  f.add({ type = "label", name = "rockets" })
   f.add({ type = "line" })
   f.add({ type = "label", caption = "[font=default-bold]Contracts[/font]" })
   f.add({ type = "flow", name = "contracts", direction = "vertical" })
@@ -87,6 +90,7 @@ function G.build_hud(player)
   local b = f.add({ type = "flow", name = "buttons", direction = "horizontal" })
   b.add({ type = "button", caption = "Shop", tags = { fd = "shop" } })
   b.add({ type = "button", caption = "Supply chain", tags = { fd = "sites" } })
+  b.add({ type = "button", name = "pad", caption = "Spaceport", tags = { fd = "pad" } })
   b.add({ type = "button", caption = "Help", tags = { fd = "help" } })
   G.update(player)
 end
@@ -106,6 +110,15 @@ function G.update(player)
     f.rank.caption = "Rank: [color=yellow]" .. rk.title .. "[/color]  - you won!"
     f.rank_bar.value = 1
   end
+  local pad = M.spaceport()
+  if f.rockets then
+    f.rockets.visible = pad ~= nil
+    if pad then
+      f.rockets.caption = "[item=rocket-silo] Rockets launched: " .. (storage.rockets or 0) ..
+        string.format("  (satellites: fares x%.2f)", M.sat_mult())
+    end
+  end
+  if f.buttons and f.buttons.pad then f.buttons.pad.visible = pad ~= nil end
   local cf = f.contracts
   cf.clear()
   if #storage.contracts == 0 then
@@ -143,7 +156,7 @@ local function open_window(player, name, title)
     screen[name].destroy()
     return nil
   end
-  for _, n in pairs({ "fd_shop", "fd_sites", "fd_help" }) do
+  for _, n in pairs({ "fd_shop", "fd_sites", "fd_help", "fd_pad" }) do
     if screen[n] then screen[n].destroy() end
   end
   local f = screen.add({ type = "frame", name = name, direction = "vertical" })
@@ -361,6 +374,13 @@ local function build_chain(player)
       "delivered " .. rate(tw.pax.got) .. "/s", "carried " .. rate(tw.pax.carried) .. "/s")
     header("[item=fd-mail] [font=default-bold]Mail[/font]", "made " .. rate(tw.mail.made) .. "/s",
       "delivered " .. rate(tw.mail.got) .. "/s", "carried " .. rate(tw.mail.carried) .. "/s")
+    local pad = M.spaceport()
+    if pad then
+      local need, st = M.pad_need(pad), M.pad_state(pad)
+      local t = site_table(sp)
+      site_row(t, "Pad", pad, "", "rocket " .. ((storage.rockets or 0) + 1) .. ": [item=fd-passengers] " .. M.fmt(st.colonists) .. " / " ..
+        M.fmt(need.colonists) .. ", [item=fd-mail] " .. M.fmt(st.mail) .. " / " .. M.fmt(need.mail))
+    end
     if #tw.full > 0 and not measuring then
       local t = site_table(sp)
       for i, s in ipairs(tw.full) do
@@ -381,6 +401,51 @@ local function build_chain(player)
     (#parts > 0 and ("\nSpare (unserved) sites: " .. table.concat(parts, ", ")) or "") .. "[/color]" })
   foot.style.single_line = false
   foot.style.maximal_width = 680
+end
+
+-- Spaceport window (0.7.0): progress of the rocket being built, cash reserve, pause.
+local function build_pad(player)
+  local s = M.spaceport()
+  if not s then return end
+  local f = open_window(player, "fd_pad", "Spaceport")
+  if not f then return end
+  local inner = f.add({ type = "frame", style = "inside_shallow_frame_with_padding", direction = "vertical" })
+  inner.style.minimal_width = 560
+  site_button(inner, s)
+  local need, st = M.pad_need(s), M.pad_state(s)
+  inner.add({ type = "label", caption = "[font=default-bold]Rocket " .. ((storage.rockets or 0) + 1) .. "[/font]  (Spaceport level " .. s.level .. ")" })
+  local function bar(caption, have, want)
+    local fl = inner.add({ type = "flow", direction = "horizontal" })
+    fl.style.vertical_align = "center"
+    local l = fl.add({ type = "label", caption = caption })
+    l.style.width = 220
+    local pb = fl.add({ type = "progressbar", value = math.min(1, have / math.max(1, want)) })
+    pb.style.width = 300
+  end
+  bar("[item=fd-passengers] Colonists " .. M.fmt(st.colonists) .. " / " .. M.fmt(need.colonists), st.colonists, need.colonists)
+  bar("[item=fd-mail] Mail " .. M.fmt(st.mail) .. " / " .. M.fmt(need.mail), st.mail, need.mail)
+  bar("Assembly " .. M.money_short(st.paid) .. " / " .. M.money_short(need.cost), st.paid, need.cost)
+  local d = inner.add({ type = "label", caption = "[color=#d8d8b0]" .. (M.site_detail(s) or "") .. "[/color]" })
+  d.style.single_line = false
+  inner.add({ type = "line" })
+  local run = inner.add({ type = "checkbox", caption = "Assemble rockets", state = not storage.pad_paused,
+    tags = { fd = "pad_run" }, tooltip = "Untick to pause. Nothing is lost while paused." })
+  local fl = inner.add({ type = "flow", direction = "horizontal" })
+  fl.style.vertical_align = "center"
+  fl.add({ type = "label", caption = "Keep at least" })
+  local items = {}
+  for _, v in ipairs(C.SPACEPORT.reserves) do table.insert(items, M.money_str(v)) end
+  fl.add({ type = "drop-down", items = items, selected_index = storage.pad_reserve or C.SPACEPORT.default_reserve,
+    tags = { fd = "pad_reserve" } })
+  fl.add({ type = "label", caption = "in cash: assembly waits whenever paying would go below it." })
+  local n = storage.rockets or 0
+  local info = inner.add({ type = "label", caption = "[color=gray]Assembly takes " .. math.floor(C.SPACEPORT.build_secs / 60) ..
+    " min and is paid as it goes. The rocket launches once it's built and its colonists and mail are aboard. " ..
+    "Colonists and mail pay their normal fare on arrival; trains keep anything the rocket doesn't need yet.\n" ..
+    "Satellites: " .. n .. " launched, every fare x" .. string.format("%.2f", M.sat_mult()) ..
+    " (+" .. math.floor(C.SPACEPORT.satellite * 100) .. "% per launch, up to +" .. math.floor(C.SPACEPORT.satellite_cap * 100) .. "%).[/color]" })
+  info.style.single_line = false
+  info.style.maximal_width = 540
 end
 
 local function build_help(player)
@@ -443,6 +508,7 @@ script.on_event(defines.events.on_gui_click, function(e)
   if a == "shop" then build_shop(player)
   elseif a == "sites" then build_chain(player)
   elseif a == "help" then build_help(player)
+  elseif a == "pad" then build_pad(player)
   elseif a == "close" then
     local w = player.gui.screen[tags.win]
     if w then w.destroy() end
@@ -474,7 +540,7 @@ function G.goto_site(player, site_id, travel)
   if not s then return end
   local surf = game.surfaces[C.SURFACE]
   local target = { s.x, s.y + C.KINDS[s.kind].radius * 0.6 }
-  for _, n in pairs({ "fd_shop", "fd_sites", "fd_help" }) do
+  for _, n in pairs({ "fd_shop", "fd_sites", "fd_help", "fd_pad" }) do
     if player.gui.screen[n] then player.gui.screen[n].destroy() end
   end
   if travel and player.character then
@@ -496,9 +562,23 @@ function G.goto_site(player, site_id, travel)
   end
 end
 
+script.on_event(defines.events.on_gui_checked_state_changed, function(e)
+  local el = e.element
+  if el and el.valid and el.tags and el.tags.fd == "pad_run" then
+    storage.pad_paused = not el.state
+  end
+end)
+
+script.on_event(defines.events.on_gui_selection_state_changed, function(e)
+  local el = e.element
+  if el and el.valid and el.tags and el.tags.fd == "pad_reserve" then
+    storage.pad_reserve = el.selected_index
+  end
+end)
+
 script.on_event(defines.events.on_gui_closed, function(e)
   local el = e.element
-  if el and el.valid and (el.name == "fd_shop" or el.name == "fd_sites" or el.name == "fd_help") then
+  if el and el.valid and (el.name == "fd_shop" or el.name == "fd_sites" or el.name == "fd_help" or el.name == "fd_pad") then
     el.destroy()
   end
 end)

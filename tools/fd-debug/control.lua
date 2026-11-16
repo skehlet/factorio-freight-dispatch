@@ -130,6 +130,31 @@ script.on_nth_tick(7200, function()
     " upgrades=" .. serpent.line(st.upgrades))
 end)
 
+
+-- Spaceport check (0.7.0): founding at the last rank, assembly, launch, cash reserve
+script.on_nth_tick(300, function()
+  local t = game.tick - (storage.start or 0)
+  if t > 6000 then return end
+  local fd = "freight_dispatch"
+  local sp = remote.call(fd, "spaceport")
+  log("FDPAD +" .. math.floor(t / 60) .. "s " .. serpent.line(sp))
+  if sp.id and not storage.pad_step then
+    storage.pad_step = 1
+    remote.call(fd, "set_pad", { colonists = sp.need.colonists, mail = sp.need.mail - 10, paid = sp.need.cost - 50000 })
+    log("FDPAD set nearly complete, mail 10 short")
+  elseif storage.pad_step == 1 then
+    storage.pad_step = 2
+    remote.call(fd, "set_pad", { mail = sp.need.mail })
+    log("FDPAD mail complete")
+  elseif storage.pad_step == 2 then
+    storage.pad_step = 3
+    -- reserve test: cash just above the $50M reserve, so only a sliver can be paid
+    remote.call(fd, "set_pad_reserve", 7)
+    remote.call(fd, "add_money", 50000100 - sp.money)
+    log("FDPAD reserve $50M, cash set to $50,000,100")
+  end
+end)
+
 script.on_nth_tick(600, function()
   snap("+" .. math.floor((game.tick - (storage.start or 0)) / 60) .. "s")
 end)

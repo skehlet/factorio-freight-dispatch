@@ -172,6 +172,33 @@ C.KINDS = {
     label = "Power Plant", icon = "fd-coal", radius = 18, color = { 1, 0.6, 1 },
     produces = {}, accepts = { "fd-coal", "fd-wood" },
   },
+  -- 0.7.0 end game: founded once at the last rank. Not in KIND_ORDER, KIND_WEIGHTS or
+  -- FOUND_TIERS, so normal founding never picks it.
+  ["spaceport"] = {
+    label = "Spaceport", icon = "rocket-silo", radius = 22, color = { 0.6, 0.9, 1 },
+    produces = {}, accepts = { "fd-passengers", "fd-mail" },
+  },
+}
+
+-- Spaceport (0.7.0, Steve's end game): a rocket needs colonists (passengers) and mail delivered
+-- by train (normal fares) and cash, paid during a fixed assembly time and paused while cash is
+-- at or below the reserve the player sets. It launches when all three are done; the next one
+-- starts at once. The pad levels up from launches (level N from launch level_at[N-1] + 1), and
+-- each launch adds `satellite` to every fare, up to `satellite_cap`.
+C.SPACEPORT = {
+  build_secs = 15 * 60,
+  levels = {
+    { colonists = 2000, mail = 500, cost = 10000000 },
+    { colonists = 3000, mail = 750, cost = 14000000 },
+    { colonists = 4000, mail = 1000, cost = 18000000 },
+    { colonists = 5000, mail = 1250, cost = 22000000 },
+    { colonists = 6000, mail = 1500, cost = 26000000 },
+  },
+  level_at = { 3, 8, 15, 25 }, -- launches done to reach level 2, 3, 4, 5
+  satellite = 0.02,            -- +2% on every fare per launch
+  satellite_cap = 0.5,         -- reached at 25 launches
+  reserves = { 0, 1000000, 2000000, 5000000, 10000000, 25000000, 50000000 },
+  default_reserve = 3,         -- index into reserves ($2M)
 }
 
 C.KIND_ORDER = { "town", "coal-mine", "iron-mine", "forest", "steel-mill", "factory", "power-plant" }

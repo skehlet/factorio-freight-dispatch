@@ -130,6 +130,48 @@ for _, b in pairs(buildings) do
   data:extend({ proto })
 end
 
+-- Spaceport (0.7.0): the vanilla rocket silo's picture with its doors shut, and the rocket
+-- itself as a sprite for the launch animation. Decorative like the other site buildings.
+do
+  local silo = data.raw["rocket-silo"] and data.raw["rocket-silo"]["rocket-silo"]
+  local layers = {}
+  if silo then
+    for _, key in pairs({ "hole_sprite", "door_back_sprite", "door_front_sprite", "base_day_sprite" }) do
+      local sp = silo[key]
+      if type(sp) == "table" and (sp.filename or sp.layers) then
+        if sp.layers then
+          for _, l in pairs(sp.layers) do table.insert(layers, table.deepcopy(l)) end
+        else
+          table.insert(layers, table.deepcopy(sp))
+        end
+      end
+    end
+  end
+  data:extend({
+    {
+      type = "simple-entity-with-owner",
+      name = "fd-silo",
+      icon = "__base__/graphics/icons/rocket-silo.png",
+      icon_size = 64,
+      flags = { "placeable-neutral", "not-blueprintable", "not-deconstructable", "not-upgradable", "not-flammable" },
+      hidden = true,
+      max_health = 1000,
+      render_layer = "object",
+      collision_box = { { -4.4, -4.4 }, { 4.4, 4.4 } },
+      selection_box = { { -4.5, -4.5 }, { 4.5, 4.5 } },
+      map_color = { 0.6, 0.9, 1 },
+      picture = #layers > 0 and { layers = layers } or fallback_picture,
+    },
+  })
+  local rocket = data.raw["rocket-silo-rocket"] and data.raw["rocket-silo-rocket"]["rocket-silo-rocket"]
+  if rocket and rocket.rocket_sprite then
+    local sp = table.deepcopy(rocket.rocket_sprite)
+    sp.type = "sprite"
+    sp.name = "fd-rocket"
+    data:extend({ sp })
+  end
+end
+
 -- Site signals (Shop): a constant combinator the mod fills every second with the stockpile
 -- of the site whose ring it stands in. Wire it to train stops or rail signals.
 -- Constant combinators, train stops and rail signals need no power, which suits this world.
