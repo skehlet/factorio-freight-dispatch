@@ -117,6 +117,19 @@ script.on_nth_tick(1800, function()
   end
 end)
 
+
+-- income by cargo: logged every 2 min (needs freight-dispatch 0.5.4+ for earned_item)
+script.on_nth_tick(7200, function()
+  local st = remote.call("freight_dispatch", "stats")
+  local waiting = 0
+  for _, s in pairs(remote.call("freight_dispatch", "sites")) do
+    if s.kind == "town" then waiting = waiting + (s.stock["fd-passengers"] or 0) end
+  end
+  log("FDINCOME +" .. math.floor((game.tick - (storage.start or 0)) / 60) .. "s money=" .. math.floor(st.money) ..
+    " lifetime=" .. math.floor(st.lifetime) .. " pax_waiting=" .. math.floor(waiting) .. " " .. serpent.line(st.earned_item) ..
+    " upgrades=" .. serpent.line(st.upgrades))
+end)
+
 script.on_nth_tick(600, function()
   snap("+" .. math.floor((game.tick - (storage.start or 0)) / 60) .. "s")
 end)

@@ -100,7 +100,7 @@ M.fl_rate = fl_rate
 -- Goods a town needs per new resident; rises with population so big cities take many goods.
 -- A powered town grows 25% more per good.
 function M.goods_per_resident(site)
-  return C.GOODS_PER_RESIDENT * math.max(1, site.pop / 1000) / power_mult(site)
+  return C.GOODS_PER_RESIDENT * math.max(1, site.pop / 1000) ^ C.GROWTH_EXP / power_mult(site)
 end
 
 -- Train liveries (0.3.5): the mod paints each carriage once and remembers it in
@@ -1139,7 +1139,11 @@ local function service_train(train)
                 local take = math.min(math.floor(lot.amount + 0.001), avail, room)
                 room = room - take
                 if take > 0 then
-                  paid = paid + payment(lot, site, item, take)
+                  local pay = payment(lot, site, item, take)
+                  paid = paid + pay
+                  -- lifetime earnings per cargo (balance checks; `stats` remote)
+                  storage.earned_item = storage.earned_item or {}
+                  storage.earned_item[item] = (storage.earned_item[item] or 0) + pay
                   deliver = deliver + take
                   avail = avail - take
                   lot.amount = lot.amount - take
@@ -1286,7 +1290,7 @@ local function simulate_second()
     local cap = C.STOCK_CAP * site.level
     fl_add(site, "secs", 1)
     if site.kind == "town" then
-      local pax = site.pop / 60 * service
+      local pax = site.pop / C.PAX_PER_POP * service
       local mail = site.pop / 400 * service
       cap = C.STOCK_CAP + site.pop * 4
       local p0, m0 = site.stock["fd-passengers"] or 0, site.stock["fd-mail"] or 0
@@ -2097,6 +2101,15 @@ script.on_nth_tick(60, function(e)
     apply_wagon_capacity()
     for _, s in pairs(storage.sites) do update_site_render(s) end
   end
+  if e.tick % C.INCOME_LOG_TICKS == 0 then
+    -- balance history (0.6.0): earnings by cargo and total town population, every 10 minutes
+    local pop = 0
+    for _, s in pairs(storage.sites) do if s.kind == "town" then pop = pop + s.pop end end
+    local earned = {}
+    for k, v in pairs(storage.earned_item or {}) do earned[k] = math.floor(v) end
+    storage.income_log = storage.income_log or {}
+    table.insert(storage.income_log, { tick = e.tick, lifetime = math.floor(storage.lifetime), pop = math.floor(pop), earned = earned })
+  end
   if e.tick % 600 == 0 then
     check_stuck()
     update_contracts()
@@ -2471,6 +2484,7 @@ remote.add_interface("freight_dispatch", {
     log("FDDUMP wagons-table-size " .. table_size(storage.wagons))
   end,
   contracts = function() return storage.contracts end,
+  income_log = function() return storage.income_log or {} end,
   -- Supply chain analysis as plain data (dev hook)
   chain = function()
     local ch = M.supply_chain()
@@ -2494,6 +2508,7 @@ remote.add_interface("freight_dispatch", {
   end,
   stats = function()
     return { money = storage.money, lifetime = storage.lifetime, sites = table_size(storage.sites),
-      contracts = #storage.contracts, deliveries = storage.deliveries or 0, fuel_spent = storage.fuel_spent or 0 }
+      contracts = #storage.contracts, deliveries = storage.deliveries or 0, fuel_spent = storage.fuel_spent or 0,
+      earned_item = storage.earned_item or {}, upgrades = storage.upgrades }
   end,
 })

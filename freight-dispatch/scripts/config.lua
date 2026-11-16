@@ -83,45 +83,54 @@ C.UPGRADES = {
     { name = "Solid fuel", item = "solid-fuel", desc = "Acceleration x1.2, top speed x1.05" },
     { name = "Rocket fuel", item = "rocket-fuel", price = 2000000, desc = "Acceleration x1.8, top speed x1.15" },
     { name = "Nuclear fuel", item = "nuclear-fuel", price = 8000000, desc = "Acceleration x2.5, top speed x1.15" },
-    { name = "Express fuel", item = "fd-express-fuel", price = 30000000, desc = "Acceleration x3, top speed x1.4" },
+    { name = "Express fuel", item = "fd-express-fuel", price = 12000000, desc = "Acceleration x3, top speed x1.4" },
   } },
   { id = "wagons", label = "Cargo wagons", icon = "item/cargo-wagon", tiers = {
     { name = "Standard wagons", slots = 40, desc = "2,000 units per wagon" },
     { name = "Extended wagons", slots = 60, price = 3000000, desc = "3,000 units per wagon" },
     { name = "Double-deck wagons", slots = 80, price = 12000000, desc = "4,000 units per wagon" },
-    { name = "Jumbo wagons", slots = 120, price = 40000000, desc = "6,000 units per wagon" },
+    { name = "Jumbo wagons", slots = 120, price = 15000000, desc = "6,000 units per wagon" },
   } },
   { id = "loading", label = "Station crews", icon = "item/fd-passengers", tiers = {
     { name = "Small crews", rate = 400, desc = "Loads 400 per wagon per second" },
     { name = "Full crews", rate = 600, price = 1000000, desc = "Loads 600 per wagon per second" },
     { name = "Double shifts", rate = 900, price = 5000000, desc = "Loads 900 per wagon per second" },
-    { name = "Automated platforms", rate = 1400, price = 20000000, desc = "Loads 1,400 per wagon per second" },
+    { name = "Automated platforms", rate = 1400, price = 8000000, desc = "Loads 1,400 per wagon per second" },
   } },
   { id = "running", label = "Running shoes", icon = "item/exoskeleton-equipment", tiers = {
     { name = "Work boots", speed = 0, desc = "Normal running speed" },
     { name = "Trail runners", speed = 0.5, price = 500000, desc = "Run 50% faster" },
     { name = "Racing spikes", speed = 1, price = 3000000, desc = "Run twice as fast" },
-    { name = "Rocket boots", speed = 2, price = 10000000, desc = "Run three times as fast" },
+    { name = "Rocket boots", speed = 2, price = 4000000, desc = "Run three times as fast" },
   } },
 }
 
 -- Cargo: rate = $ per unit per 100 tiles; decay = seconds after the grace period until pay is at its minimum
 C.CARGO = {
-  ["fd-passengers"] = { rate = 1.5, decay = 150, label = "Passengers" },
-  ["fd-mail"]       = { rate = 2.5, decay = 200, label = "Mail" },
+  ["fd-passengers"] = { rate = 3.0, decay = 150, label = "Passengers" },
+  ["fd-mail"]       = { rate = 3.5, decay = 200, label = "Mail" },
   ["fd-coal"]       = { rate = 1.0, decay = 1500, label = "Coal" },
   ["fd-iron-ore"]   = { rate = 1.0, decay = 1500, label = "Iron ore" },
   ["fd-wood"]       = { rate = 1.2, decay = 1000, label = "Lumber" },
   ["fd-steel"]      = { rate = 3.0, decay = 700, label = "Steel" },
-  ["fd-goods"]      = { rate = 5.0, decay = 400, label = "Goods" },
+  ["fd-goods"]      = { rate = 3.5, decay = 400, label = "Goods" },
 }
 
 -- Towns grow ONLY from goods (0.3.0). Passengers and mail are steady income, not growth.
--- Goods per new resident = GOODS_PER_RESIDENT x max(1, pop / 1000), so a town of 10,000
--- needs 500 goods per resident. Roughly: pop^2 rises by 40 per good delivered.
--- (Before 0.3.0 passengers, mail and plain service all compounded growth, and a playtest
+-- 0.6.0 rebalance (Steve, after a 10.9 h game where goods made 56% of income and towns hit
+-- 5,500 pop with 60-90k passengers waiting): goods 5.0 -> 3.5, passengers 1.5 -> 3.0 but made
+-- at pop/120 (was pop/60), mail 2.5 -> 3.5, growth cost GOODS_PER_RESIDENT 50 -> 100 with
+-- exponent GROWTH_EXP 1.5 (was linear), starter towns 700/550 -> 1000/800, and the top upgrade
+-- tiers cheaper (Express 30M -> 12M, Jumbo 40M -> 15M, Automated 20M -> 8M, Rocket boots 10M -> 4M).
+-- Goods per new resident = GOODS_PER_RESIDENT x max(1, pop / 1000) ^ GROWTH_EXP: 100 at
+-- 1,000 pop, 283 at 2,000, 1,118 at 5,000. A town needs ~216k goods to reach 2,000, ~613k
+-- for 3,000 and ~2.2M for 5,000 (before 0.6.0: 90k, 215k, 615k).
+-- (0.3.0 to 0.5.x used 50 x max(1, pop / 1000), linear. Before 0.3.0 passengers, mail and plain service all compounded growth, and a playtest
 -- reached 96k-pop towns.)
-C.GOODS_PER_RESIDENT = 50
+C.GOODS_PER_RESIDENT = 100
+C.GROWTH_EXP = 1.5
+C.PAX_PER_POP = 120          -- a town makes pop / PAX_PER_POP passengers per second (was 60)
+C.INCOME_LOG_TICKS = 10 * 60 * 60 -- earnings by cargo are snapshotted this often (storage.income_log)
 -- town cargo (everything else counts as freight, e.g. for contract weighting and size)
 C.TOWN_CARGO = { ["fd-passengers"] = true, ["fd-mail"] = true }
 
@@ -189,8 +198,8 @@ C.LEVEL_AT = { 20000, 60000, 150000, 350000 }
 -- Starting sites: a full goods chain around spawn. The whole layout is rotated by a random
 -- angle per map, and each site moves to the nearest dry spot that keeps the spacing rules.
 C.STARTERS = {
-  { kind = "town", x = 40, y = -30, pop = 700 },
-  { kind = "town", x = -290, y = 90, pop = 550 },
+  { kind = "town", x = 40, y = -30, pop = 1000 },
+  { kind = "town", x = -290, y = 90, pop = 800 },
   { kind = "coal-mine", x = 190, y = 170 },
   { kind = "power-plant", x = -110, y = -210 },
   { kind = "iron-mine", x = 270, y = -160 },
