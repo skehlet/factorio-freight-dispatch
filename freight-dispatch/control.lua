@@ -2078,7 +2078,7 @@ script.on_init(function()
   end
   local surf = make_surface()
   storage.seed = (surf.map_gen_settings.seed % 2147483647) + 1
-  surf.request_to_generate_chunks({ 0, 0 }, 18) -- starters reach about 400 tiles out
+  surf.request_to_generate_chunks({ 0, 0 }, 24) -- starters reach about 560 tiles out, plus 160 of search
   surf.force_generate_chunk_requests()
   place_starters()
   pcall(function() game.map_settings.pollution.enabled = false end)

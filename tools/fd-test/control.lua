@@ -205,6 +205,22 @@ local function upgrade_test()
 end
 
 script.on_nth_tick(600, function(e)
+  if not storage.spacing_logged then
+    -- starter layout: each site's distance from spawn and from its nearest neighbour
+    storage.spacing_logged = true
+    local ss = {}
+    for i = 1, 8 do ss[i] = remote.call("freight_dispatch", "site", i) end
+    for i, a in ipairs(ss) do
+      local nd
+      for j, b in ipairs(ss) do
+        if i ~= j then
+          local d = math.sqrt((a.x - b.x) ^ 2 + (a.y - b.y) ^ 2)
+          if not nd or d < nd then nd = d end
+        end
+      end
+      L(string.format("starter %d %s at %d,%d spawn=%d nearest=%d", i, a.kind, a.x, a.y, math.sqrt(a.x ^ 2 + a.y ^ 2), nd))
+    end
+  end
   if not storage.built then
     storage.built = true
     build()

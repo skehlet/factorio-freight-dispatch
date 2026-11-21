@@ -17,7 +17,7 @@ You run a railway. Towns and industries sit inside coloured rings across the map
 [font=default-bold]4. Grow.[/font] Industries level up as you ship from them. Towns grow only from goods. More output means more trains, so signalling matters.
 [font=default-bold]5. Upgrade.[/font] The Shop sells fuel, bigger wagons, faster station crews and running shoes. Each applies to every train.
 
-Whenever fewer than 6 sites are unserved, a new one is founded 200-500 tiles from your network and announced in chat. New sites fill the supply chain from the bottom up: first a coal mine and lumber camp you haven't connected yet, then an iron mine and power plant, then a town, then a steel mill, then a factory. A missing coal mine, lumber camp, iron mine, power plant or town is founded even when 6 sites are already waiting. Contracts only name places you already serve.
+Whenever fewer than 6 sites are unserved, a new one is founded 280-700 tiles from your network and announced in chat. New sites fill the supply chain from the bottom up: first a coal mine and lumber camp you haven't connected yet, then an iron mine and power plant, then a town, then a steel mill, then a factory. A missing coal mine, lumber camp, iron mine, power plant or town is founded even when 6 sites are already waiting. Contracts only name places you already serve.
 
 [font=default-bold]Supply chain window[/font] (HUD button) shows, for each cargo, what your served sites made, delivered and could use per second over the last 10 minutes, and whether anything runs short. [color=#ff6060]SHORT[/color] says why: not enough made, held back by an earlier cargo, a producer at full speed, or pickups that can't keep up (a full pile, or a site not visited every minute). [color=yellow]BACKED UP[/color] means a pile keeps filling up. "Next step" names the one fix that helps most, often a spare site to connect.
 
@@ -46,7 +46,7 @@ Whenever fewer than 6 sites are unserved, a new one is founded 200-500 tiles fro
   Makes: [item=fd-goods] goods for towns
 [item=fd-coal] [font=default-bold]Power Plant[/font]
   Needs: [item=fd-coal] coal or [item=fd-wood] lumber (worth half). Burns 15 a second, holds 20 minutes
-  Makes: power, +25% for every site in its circle (250 tiles, wider each level). One plant per site, so spread them out
+  Makes: power, +25% for every site in its circle (350 tiles, wider each level). One plant per site, so spread them out
 Each level adds the base output again (mines) or 50 more processed per second (mills, factories). Mines make less ("service") until trains pick up regularly. Input piles hold 20,000: when full, trains keep the rest aboard, and a full output pile pauses the site. Nothing is wasted.
 
 [font=default-bold]Building[/font]

@@ -11,17 +11,18 @@ C.WAGON_RATE = 400         -- units loaded/unloaded per wagon per second
 C.MIN_DIST = 60            -- cargo must travel at least this far to be paid
 C.STOCK_CAP = 4000         -- per level, for industries
 C.INPUT_CAP = 20000
--- Site spacing (0.4.0; was 100 for everything, which packed the map at ~115 tiles apart)
-C.SITE_MIN_DIST = 180      -- any two sites
-C.TOWN_MIN_DIST = 300      -- any two towns
+-- Site spacing (0.4.0; was 100 for everything, which packed the map at ~115 tiles apart).
+-- 0.7.2 (Steve: "increase some more"): everything spread x1.4 (was 180 / 300).
+C.SITE_MIN_DIST = 250      -- any two sites
+C.TOWN_MIN_DIST = 420      -- any two towns
 -- Founding (0.4.0): new sites are no longer rolled per generated chunk. Whenever unserved
 -- sites (no train stop in their ring) number fewer than max(SPARE_SITES_MIN, served x
 -- SPARE_SITES_RATIO), one new site is founded on purpose: a kind the map is short of,
 -- FOUND_MIN..FOUND_MAX tiles from one of your served sites, at most once per FOUND_GAP.
 C.SPARE_SITES_MIN = 6
 C.SPARE_SITES_RATIO = 0.5
-C.FOUND_MIN = 200
-C.FOUND_MAX = 500
+C.FOUND_MIN = 280          -- 0.7.2: was 200
+C.FOUND_MAX = 700          -- 0.7.2: was 500
 C.FOUND_GAP = 30 * 60
 -- Supply-chain order for founding (0.4.6, Steve asked: he had spare iron, steel and factories
 -- but no lumber camp to connect). The first tier with a kind that has no unserved site gets
@@ -217,8 +218,8 @@ C.POWER = {
   fuel = { ["fd-coal"] = 1, ["fd-wood"] = 0.5 }, -- fuel value per unit (lumber counts half)
   burn = 15,             -- fuel burnt per second while running
   cap = 18000,           -- fuel pile: 20 minutes of running
-  radius = 250,          -- supply radius at level 1
-  radius_per_level = 25, -- level 5: 350 tiles. Plants level up from fuel burnt (LEVEL_AT).
+  radius = 350,          -- supply radius at level 1 (0.7.2: was 250, scaled with site spacing)
+  radius_per_level = 35, -- level 5: 490 tiles (was 25 / 350). Plants level up from fuel burnt (LEVEL_AT).
   bonus = 0.25,          -- powered towns: +25% passengers and mail, and 25% more growth per good;
                          -- primary industries +25% output; mills and factories +25% processing
 }
@@ -228,15 +229,16 @@ C.LEVEL_AT = { 20000, 60000, 150000, 350000 }
 
 -- Starting sites: a full goods chain around spawn. The whole layout is rotated by a random
 -- angle per map, and each site moves to the nearest dry spot that keeps the spacing rules.
+-- 0.7.2: the 0.4.0 layout scaled x1.4 (reaches about 560 tiles from spawn).
 C.STARTERS = {
-  { kind = "town", x = 40, y = -30, pop = 1000 },
-  { kind = "town", x = -290, y = 90, pop = 800 },
-  { kind = "coal-mine", x = 190, y = 170 },
-  { kind = "power-plant", x = -110, y = -210 },
-  { kind = "iron-mine", x = 270, y = -160 },
-  { kind = "steel-mill", x = 390, y = 60 },
-  { kind = "forest", x = -340, y = -170 },
-  { kind = "factory", x = -60, y = 290 },
+  { kind = "town", x = 56, y = -42, pop = 1000 },
+  { kind = "town", x = -406, y = 126, pop = 800 },
+  { kind = "coal-mine", x = 266, y = 238 },
+  { kind = "power-plant", x = -154, y = -294 },
+  { kind = "iron-mine", x = 378, y = -224 },
+  { kind = "steel-mill", x = 546, y = 84 },
+  { kind = "forest", x = -476, y = -238 },
+  { kind = "factory", x = -84, y = 406 },
 }
 
 C.TECHS = { "railway", "automated-rail-transportation", "rail-signals", "landfill", "automobilism", "lamp", "circuit-network" }
