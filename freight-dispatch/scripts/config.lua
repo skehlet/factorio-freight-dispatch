@@ -176,23 +176,27 @@ C.KINDS = {
   -- FOUND_TIERS, so normal founding never picks it.
   ["spaceport"] = {
     label = "Spaceport", icon = "rocket-silo", radius = 22, color = { 0.6, 0.9, 1 },
-    produces = {}, accepts = { "fd-passengers", "fd-mail" },
+    produces = {}, accepts = { "fd-passengers", "fd-mail", "fd-goods" },
   },
 }
 
--- Spaceport (0.7.0, Steve's end game): a rocket needs colonists (passengers) and mail delivered
+-- Spaceport (0.7.0, Steve's end game): a rocket needs colonists (passengers), mail and (0.7.1)
+-- goods as cargo delivered
 -- by train (normal fares) and cash, paid during a fixed assembly time and paused while cash is
 -- at or below the reserve the player sets. It launches when all three are done; the next one
 -- starts at once. The pad levels up from launches (level N from launch level_at[N-1] + 1), and
 -- each launch adds `satellite` to every fare, up to `satellite_cap`.
 C.SPACEPORT = {
-  build_secs = 15 * 60,
+  build_secs = 10 * 60, -- 0.7.1: was 15 min
+  -- 0.7.1: mail 500 -> 1,000 (half the colonists; towns make 0.3 mail per passenger, and fair-share
+  -- loading carries them about 1:1), and goods added: 20k is about one 4-wagon train at 120 slots,
+  -- a few percent of a level-5 factory's output over the 10 min build
   levels = {
-    { colonists = 2000, mail = 500, cost = 10000000 },
-    { colonists = 3000, mail = 750, cost = 14000000 },
-    { colonists = 4000, mail = 1000, cost = 18000000 },
-    { colonists = 5000, mail = 1250, cost = 22000000 },
-    { colonists = 6000, mail = 1500, cost = 26000000 },
+    { colonists = 2000, mail = 1000, goods = 20000, cost = 10000000 },
+    { colonists = 3000, mail = 1500, goods = 30000, cost = 14000000 },
+    { colonists = 4000, mail = 2000, goods = 40000, cost = 18000000 },
+    { colonists = 5000, mail = 2500, goods = 50000, cost = 22000000 },
+    { colonists = 6000, mail = 3000, goods = 60000, cost = 26000000 },
   },
   level_at = { 3, 8, 15, 25 }, -- launches done to reach level 2, 3, 4, 5
   satellite = 0.02,            -- +2% on every fare per launch

@@ -90,7 +90,8 @@ end
 M.pad_need = pad_need
 
 local function pad_state(site)
-  site.pad = site.pad or { colonists = 0, mail = 0, paid = 0 }
+  site.pad = site.pad or { colonists = 0, mail = 0, goods = 0, paid = 0 }
+  site.pad.goods = site.pad.goods or 0 -- 0.7.0 saves
   return site.pad
 end
 M.pad_state = pad_state
@@ -100,6 +101,7 @@ local function pad_room(site, item)
   local need, st = pad_need(site), pad_state(site)
   if item == "fd-passengers" then return math.max(0, need.colonists - st.colonists) end
   if item == "fd-mail" then return math.max(0, need.mail - st.mail) end
+  if item == "fd-goods" then return math.max(0, need.goods - st.goods) end
   return 0
 end
 
@@ -530,6 +532,7 @@ function M.site_status(site)
       "Level " .. site.level,
       "Rocket " .. ((storage.rockets or 0) + 1) .. ": " .. icon("fd-passengers") .. " " .. fmt(st.colonists) .. " / " .. fmt(need.colonists) ..
         ", " .. icon("fd-mail") .. " " .. fmt(st.mail) .. " / " .. fmt(need.mail) ..
+        ", " .. icon("fd-goods") .. " " .. fmt(st.goods) .. " / " .. fmt(need.goods) ..
         ", " .. money_short(st.paid) .. " / " .. money_short(need.cost),
     }, SEP)
   end
@@ -586,7 +589,8 @@ function M.site_detail(site)
       local miss = {}
       if st.colonists < need.colonists then table.insert(miss, fmt(need.colonists - st.colonists) .. " " .. icon("fd-passengers")) end
       if st.mail < need.mail then table.insert(miss, fmt(need.mail - st.mail) .. " " .. icon("fd-mail")) end
-      s = "Rocket built: waiting for " .. table.concat(miss, " and ")
+      if st.goods < need.goods then table.insert(miss, fmt(need.goods - st.goods) .. " " .. icon("fd-goods")) end
+      s = "Rocket built: waiting for " .. table.concat(miss, ", ")
     end
     if (storage.rockets or 0) > 0 then table.insert(m, string.format("satellites x%.2f", sat_mult())) end
     local at = C.SPACEPORT.level_at[site.level]
@@ -959,7 +963,7 @@ local function maybe_found_site()
   if storage.pad_wanted and not M.spaceport() then
     if found_site("spaceport") then
       storage.pad_wanted = nil
-      game.print("[color=cyan]Serve it with a stop and bring colonists ([item=fd-passengers] passengers) and [item=fd-mail] mail: " ..
+      game.print("[color=cyan]Serve it with a stop and bring colonists ([item=fd-passengers] passengers), [item=fd-mail] mail and [item=fd-goods] goods: " ..
         "every rocket you launch adds a satellite, and each one raises every fare by 2%. Open the Spaceport window from your HUD.[/color]")
     end
     return
@@ -1039,9 +1043,10 @@ local function site_signals(s)
   if s.kind == "town" then add("virtual", "signal-P", s.pop) else add("virtual", "signal-L", s.level) end
   if s.kind == "power-plant" then add("virtual", "signal-F", s.fuel) end
   if s.kind == "spaceport" then
-    -- P / M: colonists and mail still needed, T: minutes of assembly left, C: cash in $1,000s
+    -- P / M / G: colonists, mail and goods still needed, T: minutes of assembly left, C: cash in $1,000s
     add("virtual", "signal-P", pad_room(s, "fd-passengers"))
     add("virtual", "signal-M", pad_room(s, "fd-mail"))
+    add("virtual", "signal-G", pad_room(s, "fd-goods"))
     add("virtual", "signal-T", math.ceil(pad_minutes_left(s)))
     add("virtual", "signal-C", storage.money / 1000)
   end
@@ -1151,6 +1156,7 @@ local function on_delivered(site, item, amount)
     local st = pad_state(site)
     if item == "fd-passengers" then st.colonists = st.colonists + amount end
     if item == "fd-mail" then st.mail = st.mail + amount end
+    if item == "fd-goods" then st.goods = st.goods + amount end
   end
   site.recv = site.recv or {}
   site.recv[item] = (site.recv[item] or 0) + amount
@@ -1396,10 +1402,11 @@ local function launch_rocket(site)
   local need = pad_need(site)
   storage.rockets = (storage.rockets or 0) + 1
   site.launches = (site.launches or 0) + 1
-  site.pad = { colonists = 0, mail = 0, paid = 0 }
+  site.pad = { colonists = 0, mail = 0, goods = 0, paid = 0 }
   local n = storage.rockets
   game.print("[color=cyan][font=default-large-bold]Rocket " .. n .. " launched from " .. site_title(site) .. "![/font][/color] " ..
-    fmt(need.colonists) .. " [item=fd-passengers] colonists and " .. fmt(need.mail) .. " [item=fd-mail] mail are on their way. " ..
+    fmt(need.colonists) .. " [item=fd-passengers] colonists, " .. fmt(need.mail) .. " [item=fd-mail] mail and " ..
+    fmt(need.goods) .. " [item=fd-goods] goods are on their way. " ..
     string.format("Satellite network: every fare +%d%%.", math.floor((sat_mult() - 1) * 100 + 0.5)) ..
     " [gps=" .. site.x .. "," .. site.y .. "," .. C.SURFACE .. "]")
   local at = C.SPACEPORT.level_at[site.level]
@@ -1407,7 +1414,7 @@ local function launch_rocket(site)
     site.level = site.level + 1
     local nx = pad_need(site)
     game.print("[color=yellow]" .. site_title(site) .. " expanded to level " .. site.level .. "![/color] Rockets now carry " ..
-      fmt(nx.colonists) .. " colonists and " .. fmt(nx.mail) .. " mail, and cost " .. M.money_str(nx.cost) .. ".")
+      fmt(nx.colonists) .. " colonists, " .. fmt(nx.mail) .. " mail and " .. fmt(nx.goods) .. " goods, and cost " .. M.money_str(nx.cost) .. ".")
   end
   local sprite = helpers.is_valid_sprite_path("fd-rocket") and "fd-rocket" or "item/rocket-silo"
   local ok, obj = pcall(rendering.draw_sprite, {
@@ -1438,7 +1445,7 @@ local function animate_launches()
 end
 
 -- Assembly: pay the build cost a little each second (never below the reserve), then launch once
--- the cost is paid and the colonists and mail are aboard.
+-- the cost is paid and the colonists, mail and goods are aboard.
 local function update_spaceport(site)
   local st = pad_state(site)
   local need = pad_need(site)
@@ -1453,7 +1460,7 @@ local function update_spaceport(site)
     end
     if pay < want - 0.001 then st.waiting_cash = true end
   end
-  if st.paid >= need.cost - 0.5 and st.colonists >= need.colonists and st.mail >= need.mail then
+  if st.paid >= need.cost - 0.5 and st.colonists >= need.colonists and st.mail >= need.mail and st.goods >= need.goods then
     launch_rocket(site)
   end
 end
@@ -2392,6 +2399,8 @@ function M.supply_chain()
         t.got = t.got + fl_rate(s, "rx:" .. it)
       end
       table.insert(rows["fd-goods"].consumers, { site = s, role = "town", wanted = 0, got = fl_rate(s, "rx:fd-goods"), short = 0 })
+    elseif s.kind == "spaceport" then
+      table.insert(rows["fd-goods"].consumers, { site = s, role = "pad", wanted = 0, got = fl_rate(s, "rx:fd-goods"), short = 0 })
     elseif kind.base then
       local item = next(kind.base)
       table.insert(rows[item].producers, { site = s, rate = fl_rate(s, "mk:" .. item), full = fl_rate(s, "full"),

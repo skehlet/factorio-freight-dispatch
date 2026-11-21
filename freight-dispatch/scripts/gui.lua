@@ -21,7 +21,7 @@ Whenever fewer than 6 sites are unserved, a new one is founded 200-500 tiles fro
 
 [font=default-bold]Supply chain window[/font] (HUD button) shows, for each cargo, what your served sites made, delivered and could use per second over the last 10 minutes, and whether anything runs short. [color=#ff6060]SHORT[/color] says why: not enough made, held back by an earlier cargo, a producer at full speed, or pickups that can't keep up (a full pile, or a site not visited every minute). [color=yellow]BACKED UP[/color] means a pile keeps filling up. "Next step" names the one fix that helps most, often a spare site to connect.
 
-[font=default-bold]Spaceport (end game)[/font] Reaching the last rank founds a Spaceport. Each rocket needs colonists ([item=fd-passengers] passengers) and [item=fd-mail] mail brought by train (normal fares), and 15 minutes of assembly paid as it goes. Assembly waits whenever paying would take your cash below the reserve you set in the Spaceport window. Every launch adds a satellite: +2% on every fare, up to +50%. The pad levels up after launches 3, 8, 15 and 25: bigger rockets, more colonists, higher cost. Site signals there output [virtual-signal=signal-P] colonists and [virtual-signal=signal-M] mail still needed, [virtual-signal=signal-T] minutes of assembly left and [virtual-signal=signal-C] your cash in $1,000s.
+[font=default-bold]Spaceport (end game)[/font] Reaching the last rank founds a Spaceport. Each rocket needs colonists ([item=fd-passengers] passengers), [item=fd-mail] mail and [item=fd-goods] goods brought by train (normal fares), and 10 minutes of assembly paid as it goes. Assembly waits whenever paying would take your cash below the reserve you set in the Spaceport window. Every launch adds a satellite: +2% on every fare, up to +50%. The pad levels up after launches 3, 8, 15 and 25: bigger rockets, more cargo, higher cost. Site signals there output [virtual-signal=signal-P] colonists, [virtual-signal=signal-M] mail and [virtual-signal=signal-G] goods still needed, [virtual-signal=signal-T] minutes of assembly left and [virtual-signal=signal-C] your cash in $1,000s.
 
 [font=default-bold]Sites[/font]
 [item=fd-passengers] [font=default-bold]Town[/font]
@@ -357,6 +357,7 @@ local function build_chain(player)
           local notes = {}
           if c.role == "booster" then table.insert(notes, "boost") end
           if c.role == "fuel" then table.insert(notes, "fuel") end
+          if c.role == "pad" then table.insert(notes, "rocket") end
           if not measuring and c.short > C.CHAIN_SHORT then
             table.insert(notes, "[color=#ff6060]" .. (c.role == "fuel" and "dry " or "short ") .. pct(c.short) .. " of the time[/color]")
           end
@@ -379,7 +380,8 @@ local function build_chain(player)
       local need, st = M.pad_need(pad), M.pad_state(pad)
       local t = site_table(sp)
       site_row(t, "Pad", pad, "", "rocket " .. ((storage.rockets or 0) + 1) .. ": [item=fd-passengers] " .. M.fmt(st.colonists) .. " / " ..
-        M.fmt(need.colonists) .. ", [item=fd-mail] " .. M.fmt(st.mail) .. " / " .. M.fmt(need.mail))
+        M.fmt(need.colonists) .. ", [item=fd-mail] " .. M.fmt(st.mail) .. " / " .. M.fmt(need.mail) ..
+        ", [item=fd-goods] " .. M.fmt(st.goods) .. " / " .. M.fmt(need.goods))
     end
     if #tw.full > 0 and not measuring then
       local t = site_table(sp)
@@ -424,6 +426,7 @@ local function build_pad(player)
   end
   bar("[item=fd-passengers] Colonists " .. M.fmt(st.colonists) .. " / " .. M.fmt(need.colonists), st.colonists, need.colonists)
   bar("[item=fd-mail] Mail " .. M.fmt(st.mail) .. " / " .. M.fmt(need.mail), st.mail, need.mail)
+  bar("[item=fd-goods] Goods " .. M.fmt(st.goods) .. " / " .. M.fmt(need.goods), st.goods, need.goods)
   bar("Assembly " .. M.money_short(st.paid) .. " / " .. M.money_short(need.cost), st.paid, need.cost)
   local d = inner.add({ type = "label", caption = "[color=#d8d8b0]" .. (M.site_detail(s) or "") .. "[/color]" })
   d.style.single_line = false
@@ -440,8 +443,8 @@ local function build_pad(player)
   fl.add({ type = "label", caption = "in cash: assembly waits whenever paying would go below it." })
   local n = storage.rockets or 0
   local info = inner.add({ type = "label", caption = "[color=gray]Assembly takes " .. math.floor(C.SPACEPORT.build_secs / 60) ..
-    " min and is paid as it goes. The rocket launches once it's built and its colonists and mail are aboard. " ..
-    "Colonists and mail pay their normal fare on arrival; trains keep anything the rocket doesn't need yet.\n" ..
+    " min and is paid as it goes. The rocket launches once it's built and its colonists, mail and goods are aboard. " ..
+    "Deliveries pay their normal fare on arrival; trains keep anything the rocket doesn't need yet.\n" ..
     "Satellites: " .. n .. " launched, every fare x" .. string.format("%.2f", M.sat_mult()) ..
     " (+" .. math.floor(C.SPACEPORT.satellite * 100) .. "% per launch, up to +" .. math.floor(C.SPACEPORT.satellite_cap * 100) .. "%).[/color]" })
   info.style.single_line = false

@@ -131,27 +131,24 @@ script.on_nth_tick(7200, function()
 end)
 
 
--- Spaceport check (0.7.0): founding at the last rank, assembly, launch, cash reserve
+-- Spaceport check: passive log of the pad (set storage.pad_test = true in on_init for the scripted test)
 script.on_nth_tick(300, function()
   local t = game.tick - (storage.start or 0)
-  if t > 6000 then return end
+  if t > 6000 and t % 3600 > 300 then return end
   local fd = "freight_dispatch"
   local sp = remote.call(fd, "spaceport")
   log("FDPAD +" .. math.floor(t / 60) .. "s " .. serpent.line(sp))
+  if not storage.pad_test then return end
   if sp.id and not storage.pad_step then
     storage.pad_step = 1
-    remote.call(fd, "set_pad", { colonists = sp.need.colonists, mail = sp.need.mail - 10, paid = sp.need.cost - 50000 })
-    log("FDPAD set nearly complete, mail 10 short")
+    local set = { colonists = sp.need.colonists, mail = sp.need.mail, paid = sp.need.cost - 50000 }
+    if sp.need.goods then set.goods = sp.need.goods - 10 end
+    remote.call(fd, "set_pad", set)
+    log("FDPAD set nearly complete, goods 10 short")
   elseif storage.pad_step == 1 then
     storage.pad_step = 2
-    remote.call(fd, "set_pad", { mail = sp.need.mail })
-    log("FDPAD mail complete")
-  elseif storage.pad_step == 2 then
-    storage.pad_step = 3
-    -- reserve test: cash just above the $50M reserve, so only a sliver can be paid
-    remote.call(fd, "set_pad_reserve", 7)
-    remote.call(fd, "add_money", 50000100 - sp.money)
-    log("FDPAD reserve $50M, cash set to $50,000,100")
+    if sp.need.goods then remote.call(fd, "set_pad", { goods = sp.need.goods }) end
+    log("FDPAD goods complete")
   end
 end)
 
