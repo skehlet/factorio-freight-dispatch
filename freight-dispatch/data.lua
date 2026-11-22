@@ -250,3 +250,34 @@ do
       results = { { type = "item", name = "fd-decider", amount = 1 } } },
   })
 end
+
+-- Map memory (0.7.6): an invisible radar that needs no power and keeps the chunks around it
+-- live on the map (no fog of war). The script places one per block of charted land, so
+-- anything you've seen once stays visible. It scans nothing farther out, so it never
+-- explores or generates new land by itself.
+do
+  local empty = { filename = "__core__/graphics/empty.png", width = 1, height = 1, direction_count = 1 }
+  data:extend({
+    {
+      type = "radar",
+      name = "fd-eye",
+      icon = "__base__/graphics/icons/radar.png",
+      flags = { "placeable-off-grid", "not-on-map", "not-blueprintable", "not-deconstructable", "not-upgradable",
+        "not-flammable", "not-repairable", "not-in-kill-statistics", "no-automated-item-removal", "no-automated-item-insertion" },
+      hidden = true,
+      selectable_in_game = false,
+      max_health = 1000,
+      collision_box = { { -0.1, -0.1 }, { 0.1, 0.1 } },
+      collision_mask = { layers = {} },
+      energy_source = { type = "void" },
+      energy_usage = "1kW",
+      energy_per_sector = "1MJ",
+      max_distance_of_sector_revealed = 0,
+      max_distance_of_nearby_sector_revealed = 2,
+      energy_per_nearby_scan = "1J",
+      connects_to_other_radars = false,
+      is_military_target = false,
+      pictures = empty,
+    },
+  })
+end

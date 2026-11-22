@@ -274,12 +274,19 @@ local function box(x, y, r)
   return { { x - r, y - r }, { x + r, y + r } }
 end
 
+-- Is any of the player's own stuff in the area? (Ignores the invisible map-memory radars.)
+local function player_stuff(surf, area)
+  local n = surf.count_entities_filtered({ area = area, force = C.FORCE })
+  if n == 0 then return false end
+  return n > surf.count_entities_filtered({ area = area, force = C.FORCE, name = "fd-eye" })
+end
+
 local function land_ok(surf, x, y, r)
   local names = get_water_names()
   if #names > 0 and surf.count_tiles_filtered({ area = box(x, y, r), name = names }) > 0 then
     return false
   end
-  if surf.count_entities_filtered({ area = box(x, y, r), force = C.FORCE, limit = 1 }) > 0 then
+  if player_stuff(surf, box(x, y, r)) then
     return false
   end
   return true
@@ -370,7 +377,7 @@ local function grow_town_buildings(site)
       local x, y = site.x + s[1] + 0.5, site.y + s[2] + 0.5
       local name = (i % 4 == 0) and "fd-shop" or "fd-house"
       if surf.is_chunk_generated({ math.floor(x / 32), math.floor(y / 32) })
-          and surf.count_entities_filtered({ area = box(x, y, 2.5), force = "player", limit = 1 }) == 0 then
+          and not player_stuff(surf, box(x, y, 2.5)) then
         clear_area(surf, box(x, y, 1.6))
         if surf.can_place_entity({ name = name, position = { x, y }, force = "neutral" }) then
           place_building(surf, name, x, y)
@@ -1764,6 +1771,39 @@ local function reveal_stops()
   end
 end
 
+-- Map memory (0.7.6, Steve asked: once seen, no fog of war). Each block of EYE_BLOCK x EYE_BLOCK
+-- chunks that has anything charted gets one invisible radar (fd-eye) in its middle chunk, whose
+-- nearby scan (radius 2 chunks) keeps exactly that block live. Trains, stops, the survey and the
+-- character still do the exploring; the radars only remember.
+local EYE_BLOCK = 5
+local function place_eye(surf, cx, cy)
+  if not prototypes.entity["fd-eye"] then return end
+  storage.eyes = storage.eyes or {}
+  local bx, by = math.floor(cx / EYE_BLOCK), math.floor(cy / EYE_BLOCK)
+  local key = bx .. "," .. by
+  local e = storage.eyes[key]
+  if e and e.valid then return end
+  local half = math.floor(EYE_BLOCK / 2)
+  e = surf.create_entity({ name = "fd-eye", force = C.FORCE, create_build_effect_smoke = false,
+    position = { (bx * EYE_BLOCK + half) * 32 + 16, (by * EYE_BLOCK + half) * 32 + 16 } })
+  if e then
+    e.destructible = false
+    e.minable_flag = false
+    storage.eyes[key] = e
+  end
+end
+
+-- every charted chunk gets its block's radar (old saves, on configuration change)
+local function place_all_eyes()
+  local surf, f = surface(), force()
+  if not surf then return 0 end
+  for c in surf.get_chunks() do
+    if f.is_chunk_charted(surf, c) then place_eye(surf, c.x, c.y) end
+  end
+  return table_size(storage.eyes or {})
+end
+M.place_all_eyes = place_all_eyes
+
 function M.survey(player)
   local cost = C.SURVEY_PRICE
   if not spend(cost) then
@@ -2151,6 +2191,8 @@ script.on_configuration_changed(function()
     if M.rank() == #C.RANKS and not M.spaceport() then storage.pad_wanted = true end
     -- 0.7.4: the Spaceport's picture becomes a real silo (doors and rocket animate)
     if M.spaceport() then ensure_pad_silo(M.spaceport()) end
+    -- 0.7.6: no fog of war over anything already charted
+    place_all_eyes()
     no_silo_victory()
   end
   for _, p in pairs(game.players) do gui.build_hud(p) end
@@ -2182,6 +2224,7 @@ end)
 script.on_event(defines.events.on_chunk_charted, function(e)
   if e.surface_index ~= (surface() and surface().index) then return end
   local cx, cy = e.position.x, e.position.y
+  place_eye(surface(), cx, cy)
   for _, s in pairs(storage.sites) do
     if not s.tagged and math.floor(s.x / 32) == cx and math.floor(s.y / 32) == cy then
       tag_site(s)
@@ -2744,6 +2787,7 @@ remote.add_interface("freight_dispatch", {
   end,
   set_pad = function(t) local s = M.spaceport(); for k, v in pairs(t) do pad_state(s)[k] = v end end,
   set_pad_reserve = function(i) storage.pad_reserve = i end,
+  eyes = function() return M.place_all_eyes() end,
   -- Supply chain analysis as plain data (dev hook)
   chain = function()
     local ch = M.supply_chain()
