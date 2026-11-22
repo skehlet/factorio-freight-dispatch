@@ -34,6 +34,7 @@ Run the script as `powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\f
 |---|---|
 | `freight-dispatch/info.json` | `factorio_version` "2.1" |
 | `freight-dispatch/data.lua` | 7 cargo items (`fd-*`, stack size 50, so a wagon holds 2,000) and 7 decorative site buildings: `simple-entity-with-owner` borrowing vanilla animations (lab = house, assembler = shop/factory/sawmill, drill, steel furnace, steam engine), with a fallback picture |
+| `freight-dispatch/data-final-fixes.lua` | 0.7.5: deletes every achievement prototype (Steve asked after the real silo's launches awarded him "Lazy bastard" and "Smoke me a kipper"). This applies to every save while the mod is enabled, since data stage is global. fd-test logs `achievements=0` |
 | `freight-dispatch/scripts/config.lua` | **All tuning:** prices, cargo rates and decay, site kinds, weights, level thresholds, starter sites, ranks, sight radii, names |
 | `freight-dispatch/control.lua` | All game logic (single module `M`, plus a remote interface `freight_dispatch`) |
 | `freight-dispatch/scripts/gui.lua` | Left HUD (cash, income, rank, contracts) and screen windows (Shop, Sites, Help, including the HELP text) |

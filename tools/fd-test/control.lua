@@ -277,6 +277,7 @@ script.on_nth_tick(600, function(e)
     if t and t.valid then
       local w = t.cargo_wagons[1]
       local fuel = t.locomotives.front_movers[1].get_fuel_inventory().get_contents()
+      L("achievements=" .. #prototypes.achievement)
       L("wagon slots=" .. #w.get_inventory(defines.inventory.cargo_wagon) .. " fuel=" .. serpent.line(fuel) ..
         " vmax=" .. string.format("%.3f", storage.vmax or 0))
     end
