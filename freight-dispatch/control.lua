@@ -446,7 +446,7 @@ local function build_site_structures(surf, site)
       place_building(surf, "fd-factory", x + o[1] + 0.5, y + o[2] + 0.5)
     end
   elseif k == "spaceport" then
-    place_building(surf, "fd-silo", x + 0.5, y + 0.5)
+    place_building(surf, prototypes.entity["fd-spaceport-silo"] and "fd-spaceport-silo" or "fd-silo", x + 0.5, y + 0.5)
   elseif k == "power-plant" then
     for _, dx in pairs({ -4, 0, 4 }) do
       place_building(surf, "fd-generator", x + dx + 0.5, y + 0.5)
@@ -590,7 +590,11 @@ function M.site_detail(site)
       if st.colonists < need.colonists then table.insert(miss, fmt(need.colonists - st.colonists) .. " " .. icon("fd-passengers")) end
       if st.mail < need.mail then table.insert(miss, fmt(need.mail - st.mail) .. " " .. icon("fd-mail")) end
       if st.goods < need.goods then table.insert(miss, fmt(need.goods - st.goods) .. " " .. icon("fd-goods")) end
-      s = "Rocket built: waiting for " .. table.concat(miss, ", ")
+      if #miss == 0 then
+        s = "Rocket rolling out: launching soon"
+      else
+        s = "Rocket built: waiting for " .. table.concat(miss, ", ")
+      end
     end
     if (storage.rockets or 0) > 0 then table.insert(m, string.format("satellites x%.2f", sat_mult())) end
     local at = C.SPACEPORT.level_at[site.level]
@@ -1397,8 +1401,39 @@ local function update_power()
   end
 end
 
--- Launch: a rocket sprite rises from the pad for 10 s (moved by on_nth_tick 2)
-local function launch_rocket(site)
+-- The Spaceport's real rocket silo (0.7.4), placed at the site centre. Nil if missing (then the
+-- old sprite launch is used).
+local function pad_silo(site)
+  local surf = surface()
+  return surf and surf.find_entity("fd-spaceport-silo", { site.x + 0.5, site.y + 0.5 }) or nil
+end
+
+-- Put the real silo on a Spaceport (new site, or a save from before 0.7.4 with the picture).
+local function ensure_pad_silo(site)
+  if pad_silo(site) or not prototypes.entity["fd-spaceport-silo"] then return end
+  local surf = surface()
+  for _, e in pairs(surf.find_entities_filtered({ name = "fd-silo", position = { site.x + 0.5, site.y + 0.5 }, radius = 2 })) do
+    e.destroy()
+  end
+  local e = surf.create_entity({ name = "fd-spaceport-silo", position = { site.x + 0.5, site.y + 0.5 }, force = "neutral",
+    create_build_effect_smoke = false })
+  if e then
+    e.destructible = false
+    e.minable_flag = false
+    e.operable = false
+  end
+end
+
+-- No "you won" screen: the vanilla silo script would end the game on the first launch.
+local function no_silo_victory()
+  if remote.interfaces["silo_script"] and remote.interfaces["silo_script"]["set_no_victory"] then
+    remote.call("silo_script", "set_no_victory", true)
+  end
+end
+
+-- Launch: the silo launches its rocket (or, without a silo, a rocket sprite rises for 10 s,
+-- moved by on_nth_tick 2)
+local function launch_rocket(site, silo)
   local need = pad_need(site)
   storage.rockets = (storage.rockets or 0) + 1
   site.launches = (site.launches or 0) + 1
@@ -1416,6 +1451,7 @@ local function launch_rocket(site)
     game.print("[color=yellow]" .. site_title(site) .. " expanded to level " .. site.level .. "![/color] Rockets now carry " ..
       fmt(nx.colonists) .. " colonists, " .. fmt(nx.mail) .. " mail and " .. fmt(nx.goods) .. " goods, and cost " .. M.money_str(nx.cost) .. ".")
   end
+  if silo then return end -- the silo plays its own launch
   local sprite = helpers.is_valid_sprite_path("fd-rocket") and "fd-rocket" or "item/rocket-silo"
   local ok, obj = pcall(rendering.draw_sprite, {
     sprite = sprite, surface = surface(), target = { site.x + 0.5, site.y - 1 },
@@ -1460,7 +1496,22 @@ local function update_spaceport(site)
     end
     if pay < want - 0.001 then st.waiting_cash = true end
   end
-  if st.paid >= need.cost - 0.5 and st.colonists >= need.colonists and st.mail >= need.mail and st.goods >= need.goods then
+  local silo = pad_silo(site)
+  local built = st.paid >= need.cost - 0.5
+  if silo then
+    -- the silo's rocket parts follow the assembly; at 100% the engine rolls the rocket out
+    local status = silo.rocket_silo_status
+    if status == defines.rocket_silo_status.building_rocket then
+      local req = silo.prototype.rocket_parts_required or 100
+      local parts = built and req or math.min(req - 1, math.floor(req * st.paid / math.max(1, need.cost)))
+      if silo.rocket_parts ~= parts then silo.rocket_parts = parts end
+    end
+    if built and st.colonists >= need.colonists and st.mail >= need.mail and st.goods >= need.goods
+      and status == defines.rocket_silo_status.rocket_ready then
+      no_silo_victory()
+      if silo.launch_rocket() then launch_rocket(site, silo) end
+    end
+  elseif built and st.colonists >= need.colonists and st.mail >= need.mail and st.goods >= need.goods then
     launch_rocket(site)
   end
 end
@@ -2084,6 +2135,7 @@ script.on_init(function()
   pcall(function() game.map_settings.pollution.enabled = false end)
   pcall(function() game.map_settings.enemy_expansion.enabled = false end)
   setup_force()
+  no_silo_victory()
   for _, p in pairs(game.players) do setup_player(p) end
 end)
 
@@ -2097,6 +2149,9 @@ script.on_configuration_changed(function()
     for _, t in pairs(game.train_manager.get_trains({ surface = game.surfaces[C.SURFACE] })) do paint_train(t) end
     -- 0.7.0: a save already at the last rank gets its Spaceport
     if M.rank() == #C.RANKS and not M.spaceport() then storage.pad_wanted = true end
+    -- 0.7.4: the Spaceport's picture becomes a real silo (doors and rocket animate)
+    if M.spaceport() then ensure_pad_silo(M.spaceport()) end
+    no_silo_victory()
   end
   for _, p in pairs(game.players) do gui.build_hud(p) end
 end)

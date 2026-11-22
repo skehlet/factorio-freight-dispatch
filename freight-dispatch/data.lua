@@ -150,6 +150,27 @@ do
       end
     end
   end
+  -- 0.7.4: a real rocket silo (no power needed, nothing to craft) so the engine plays its own
+  -- sequence: lights, doors opening, the rocket rising out of the hole, launch, doors closing.
+  -- The script sets rocket_parts from the assembly progress and calls launch_rocket().
+  if silo then
+    local rs = table.deepcopy(silo)
+    rs.name = "fd-spaceport-silo"
+    rs.flags = { "placeable-neutral", "not-blueprintable", "not-deconstructable", "not-upgradable", "not-flammable" }
+    rs.hidden = true
+    rs.minable = nil
+    rs.fast_replaceable_group = nil
+    rs.next_upgrade = nil
+    rs.energy_source = { type = "void" }
+    rs.module_slots = 0
+    rs.allowed_effects = {}
+    rs.icons_positioning = nil
+    rs.placeable_by = nil
+    rs.map_color = { 0.6, 0.9, 1 }
+    rs.corpse = nil
+    rs.dying_explosion = nil
+    data:extend({ rs })
+  end
   data:extend({
     {
       type = "simple-entity-with-owner",
