@@ -59,12 +59,38 @@ data:extend({
     fuel_top_speed_multiplier = 1.4,
     stack_size = 10,
   },
+  -- 0.8.2: two more fuel tiers, unlocked after the first rocket
+  {
+    type = "item",
+    name = "fd-plasma-fuel",
+    icons = { { icon = "__base__/graphics/icons/nuclear-fuel.png", icon_size = 64, tint = { 1, 0.55, 1, 1 } } },
+    subgroup = "fd-cargo",
+    order = "z2",
+    fuel_categories = { "chemical" },
+    fuel_value = "3GJ",
+    fuel_acceleration_multiplier = 3.5,
+    fuel_top_speed_multiplier = 1.55,
+    stack_size = 10,
+  },
+  {
+    type = "item",
+    name = "fd-antimatter-fuel",
+    icons = { { icon = "__base__/graphics/icons/nuclear-fuel.png", icon_size = 64, tint = { 1, 0.85, 0.35, 1 } } },
+    subgroup = "fd-cargo",
+    order = "z3",
+    fuel_categories = { "chemical" },
+    fuel_value = "5GJ",
+    fuel_acceleration_multiplier = 4,
+    fuel_top_speed_multiplier = 1.7,
+    stack_size = 10,
+  },
 })
 -- A train's speed is capped by its slowest carriage. Vanilla wagons (1.5) would cap
--- Express fuel (locomotive 1.2 x 1.4 = 1.68). Vanilla trains never exceed 1.38, so
--- raising the wagon limit changes nothing in normal games.
+-- Express fuel (locomotive 1.2 x 1.4 = 1.68), and since 0.8.2 Antimatter fuel reaches
+-- 1.2 x 1.7 = 2.04. Vanilla trains never exceed 1.38, so raising the wagon limit changes
+-- nothing in normal games.
 for _, w in pairs(data.raw["cargo-wagon"] or {}) do
-  if w.max_speed and w.max_speed < 2 then w.max_speed = 2 end
+  if w.max_speed and w.max_speed < 2.1 then w.max_speed = 2.1 end
 end
 
 -- Site buildings (decorative, indestructible) ---------------------------------

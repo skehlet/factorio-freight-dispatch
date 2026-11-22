@@ -61,6 +61,8 @@ C.PRICES = {
   ["rocket-fuel"] = 300,
   ["nuclear-fuel"] = 2500,
   ["fd-express-fuel"] = 4000,
+  ["fd-plasma-fuel"] = 6000,     -- 0.8.2
+  ["fd-antimatter-fuel"] = 9000, -- 0.8.2
   ["car"] = 4000,
   ["small-lamp"] = 30,
   ["fd-site-signals"] = 2000,
@@ -80,30 +82,41 @@ C.SHOP = {
 }
 
 -- Upgrades (Shop). Tier 1 is what you start with. Each applies to every train at once.
+-- 0.8.2 (Steve): two more tiers per line, each with `rockets = 1`: buyable only once the first
+-- rocket has launched. Priced as an end game cash sink (about $230M for all eight, against
+-- about $3M/min income at that stage).
 C.UPGRADES = {
   { id = "fuel", label = "Locomotive fuel", icon = "item/rocket-fuel", tiers = {
     { name = "Solid fuel", item = "solid-fuel", desc = "Acceleration x1.2, top speed x1.05" },
     { name = "Rocket fuel", item = "rocket-fuel", price = 2000000, desc = "Acceleration x1.8, top speed x1.15" },
     { name = "Nuclear fuel", item = "nuclear-fuel", price = 8000000, desc = "Acceleration x2.5, top speed x1.15" },
     { name = "Express fuel", item = "fd-express-fuel", price = 12000000, desc = "Acceleration x3, top speed x1.4" },
+    { name = "Plasma fuel", item = "fd-plasma-fuel", price = 30000000, rockets = 1, desc = "Acceleration x3.5, top speed x1.55" },
+    { name = "Antimatter fuel", item = "fd-antimatter-fuel", price = 60000000, rockets = 1, desc = "Acceleration x4, top speed x1.7" },
   } },
   { id = "wagons", label = "Cargo wagons", icon = "item/cargo-wagon", tiers = {
     { name = "Standard wagons", slots = 40, desc = "2,000 units per wagon" },
     { name = "Extended wagons", slots = 60, price = 3000000, desc = "3,000 units per wagon" },
     { name = "Double-deck wagons", slots = 80, price = 12000000, desc = "4,000 units per wagon" },
     { name = "Jumbo wagons", slots = 120, price = 15000000, desc = "6,000 units per wagon" },
+    { name = "Articulated wagons", slots = 160, price = 25000000, rockets = 1, desc = "8,000 units per wagon" },
+    { name = "Superfreighter wagons", slots = 200, price = 50000000, rockets = 1, desc = "10,000 units per wagon" },
   } },
   { id = "loading", label = "Station crews", icon = "item/fd-passengers", tiers = {
     { name = "Small crews", rate = 400, desc = "Loads 400 per wagon per second" },
     { name = "Full crews", rate = 600, price = 1000000, desc = "Loads 600 per wagon per second" },
     { name = "Double shifts", rate = 900, price = 5000000, desc = "Loads 900 per wagon per second" },
     { name = "Automated platforms", rate = 1400, price = 8000000, desc = "Loads 1,400 per wagon per second" },
+    { name = "Robotic loaders", rate = 2000, price = 15000000, rockets = 1, desc = "Loads 2,000 per wagon per second" },
+    { name = "Gravity chutes", rate = 3000, price = 30000000, rockets = 1, desc = "Loads 3,000 per wagon per second" },
   } },
   { id = "running", label = "Running shoes", icon = "item/exoskeleton-equipment", tiers = {
     { name = "Work boots", speed = 0, desc = "Normal running speed" },
     { name = "Trail runners", speed = 0.5, price = 500000, desc = "Run 50% faster" },
     { name = "Racing spikes", speed = 1, price = 3000000, desc = "Run twice as fast" },
     { name = "Rocket boots", speed = 2, price = 4000000, desc = "Run three times as fast" },
+    { name = "Jet boots", speed = 3, price = 8000000, rockets = 1, desc = "Run four times as fast" },
+    { name = "Warp boots", speed = 5, price = 16000000, rockets = 1, desc = "Run six times as fast" },
   } },
 }
 

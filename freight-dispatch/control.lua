@@ -734,13 +734,16 @@ end
 local function update_supply_circle(site)
   if site.kind ~= "power-plant" or not site.render then return end
   local on = plant_running(site)
-  local a = on and 0.75 or 0.2 -- 0.5.3: was 0.45 / 0.12 and widths 4 / 2 (Steve: too hard to see)
-  local col = { 0.9 * a, 0.5 * a, 0.9 * a, a }
+  -- 0.8.1 (Steve: more noticeable still): opaque, more saturated purple, widths 12 / 6.
+  -- 0.5.3: 0.75 / 0.2 and widths 6 / 3; before that 0.45 / 0.12 and 4 / 2.
+  local a = on and 1 or 0.35
+  local col = { 1 * a, 0.3 * a, 1 * a, a }
+  local w_game, w_map = 12, 6
   for _, key in pairs({ "supply", "supply_map" }) do
     local o = site.render[key]
     if not (o and o.valid) then
       o = rendering.draw_circle({
-        color = col, radius = supply_radius(site), width = key == "supply" and 6 or 3, filled = false,
+        color = col, radius = supply_radius(site), width = key == "supply" and w_game or w_map, filled = false,
         target = { site.x, site.y }, surface = surface(), draw_on_ground = true,
         render_mode = key == "supply" and "game" or "chart",
       })
@@ -748,7 +751,7 @@ local function update_supply_circle(site)
     end
     o.radius = supply_radius(site)
     o.color = col
-    o.width = key == "supply" and 6 or 3
+    o.width = key == "supply" and w_game or w_map
   end
 end
 
@@ -1691,6 +1694,18 @@ local function refuel_trains()
                 end
               end
             end
+            -- 0.8.2: a fuel upgrade takes effect at once. The engine keeps the speed multipliers
+            -- of the item being burnt, and an old Express item lasts a long time, so the
+            -- burning item is swapped too (charged as one new fuel item).
+            local burner = loco.burner
+            local cb = burner and burner.currently_burning
+            local cname = cb and (cb.name.name or cb.name)
+            if cname and cname ~= fuel and storage.money >= price then
+              burner.currently_burning = { name = fuel, quality = "normal" }
+              burner.remaining_burning_fuel = prototypes.item[fuel].fuel_value
+              storage.money = storage.money - price
+              storage.fuel_spent = (storage.fuel_spent or 0) + price
+            end
             if inv.get_item_count(fuel) < 2 then
               if storage.money >= price * 3 then
                 local ins = inv.insert({ name = fuel, count = 3 })
@@ -1735,6 +1750,10 @@ function M.buy_upgrade(player, id)
   local _, level = upgrade_tier(id)
   local nxt = u.tiers[level + 1]
   if not nxt then return end
+  if nxt.rockets and (storage.rockets or 0) < nxt.rockets then
+    (player or game).print("[color=red]" .. nxt.name .. " unlocks after your first rocket launch.[/color]")
+    return
+  end
   if not spend(nxt.price) then
     (player or game).print("[color=red]Not enough money for " .. nxt.name .. " (" .. M.money_str(nxt.price) .. ").[/color]")
     return

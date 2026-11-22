@@ -15,7 +15,7 @@ You run a railway. Towns and industries sit inside coloured rings across the map
   Two-way passenger lines and loops: "Full cargo OR 30 seconds" at every town.
 [font=default-bold]3. Get paid.[/font] Amount x straight-line distance x cargo rate. Cargo must travel 60+ tiles, and slow trips pay less (passengers and mail lose value fastest).
 [font=default-bold]4. Grow.[/font] Industries level up as you ship from them. Towns grow only from goods. More output means more trains, so signalling matters.
-[font=default-bold]5. Upgrade.[/font] The Shop sells fuel, bigger wagons, faster station crews and running shoes. Each applies to every train.
+[font=default-bold]5. Upgrade.[/font] The Shop sells fuel, bigger wagons, faster station crews and running shoes. Each applies to every train. The top two tiers of each unlock after your first rocket launch.
 
 Whenever fewer than 6 sites are unserved, a new one is founded 280-700 tiles from your network and announced in chat. New sites fill the supply chain from the bottom up: first a coal mine and lumber camp you haven't connected yet, then an iron mine and power plant, then a town, then a steel mill, then a factory. A missing coal mine, lumber camp, iron mine, power plant or town is founded even when 6 sites are already waiting. Contracts only name places you already serve.
 
@@ -216,9 +216,12 @@ local function build_shop(player)
     l.style.minimal_width = 230
     local n = ut.add({ type = "label", caption = nxt and ("Next: " .. nxt.name .. " (" .. nxt.desc .. ")") or "[color=green]Fully upgraded[/color]" })
     n.style.minimal_width = 330
-    local b = ut.add({ type = "button", caption = nxt and M.money_str(nxt.price) or "Max", tags = { fd = "upgrade", id = u.id },
-      tooltip = nxt and ("Buy " .. nxt.name) or nil })
-    b.enabled = nxt ~= nil and storage.money >= nxt.price
+    -- 0.8.2: the top two tiers wait for the first rocket launch
+    local locked = nxt and nxt.rockets and (storage.rockets or 0) < nxt.rockets
+    local b = ut.add({ type = "button", caption = locked and "After 1st rocket" or (nxt and M.money_str(nxt.price) or "Max"),
+      tags = { fd = "upgrade", id = u.id },
+      tooltip = nxt and (locked and (nxt.name .. " (" .. M.money_str(nxt.price) .. ") unlocks after your first rocket launch.") or ("Buy " .. nxt.name)) or nil })
+    b.enabled = nxt ~= nil and not locked and storage.money >= nxt.price
   end
   -- 0.7.8: more Spaceports, once the free first one exists
   if M.spaceport() then
