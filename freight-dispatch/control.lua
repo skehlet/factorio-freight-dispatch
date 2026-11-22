@@ -73,15 +73,35 @@ end
 M.power_mult = power_mult
 
 -- Spaceport (0.7.0) ----------------------------------------------------------
--- Satellite network: every launch adds C.SPACEPORT.satellite to all fares, up to the cap.
+-- Satellite network: every launch adds C.SPACEPORT.satellite, up to the cap. Since 0.7.8 it
+-- multiplies town passengers and mail and every power plant's supply radius (it was a fare
+-- multiplier before, which only grew a cash pile nothing needed).
 local function sat_mult()
   return 1 + math.min(C.SPACEPORT.satellite_cap, (storage.rockets or 0) * C.SPACEPORT.satellite)
 end
 M.sat_mult = sat_mult
 
+-- 0.7.8: more than one Spaceport. M.spaceport() is the first (the free one), M.spaceports() all
+-- of them in id order.
+function M.spaceports()
+  local list = {}
+  for _, s in pairs(storage.sites) do
+    if s.kind == "spaceport" then table.insert(list, s) end
+  end
+  table.sort(list, function(a, b) return a.id < b.id end)
+  return list
+end
+
 function M.spaceport()
   local s = storage.spaceport_id and storage.sites[storage.spaceport_id]
-  return s
+  return s or M.spaceports()[1]
+end
+
+-- price of the next Spaceport bought in the Shop (the first one is free at Railway Tycoon)
+function M.pad_price()
+  local n = (storage.pads_bought or 0) + 1
+  local p = C.SPACEPORT.buy_prices
+  return p[math.min(n, #p)] * 2 ^ math.max(0, n - #p)
 end
 
 local function pad_need(site)
@@ -114,6 +134,16 @@ local function pad_rate(site)
   return pad_need(site).cost / C.SPACEPORT.build_secs
 end
 
+-- 0.7.7: share of the rocket's cargo aboard (average of colonists, mail and goods, each capped at
+-- 1). Assembly is paid only up to this share of the cost, so it follows the deliveries.
+local function pad_cargo_frac(site)
+  local need, st = pad_need(site), pad_state(site)
+  local function f(have, want) return math.min(1, have / math.max(1, want)) end
+  return (f(st.colonists, need.colonists) + f(st.mail, need.mail) + f(st.goods, need.goods)) / 3
+end
+M.pad_cargo_frac = pad_cargo_frac
+
+-- minutes of assembly left once all the cargo is aboard
 local function pad_minutes_left(site)
   local st = pad_state(site)
   return math.max(0, (pad_need(site).cost - st.paid) / pad_rate(site) / 60)
@@ -479,7 +509,7 @@ local function cargo_list_str(items)
 end
 
 local function supply_radius(site)
-  return C.POWER.radius + C.POWER.radius_per_level * (site.level - 1)
+  return math.floor((C.POWER.radius + C.POWER.radius_per_level * (site.level - 1)) * sat_mult())
 end
 M.supply_radius = supply_radius
 
@@ -537,7 +567,7 @@ function M.site_status(site)
     local need, st = pad_need(site), pad_state(site)
     return table.concat({
       "Level " .. site.level,
-      "Rocket " .. ((storage.rockets or 0) + 1) .. ": " .. icon("fd-passengers") .. " " .. fmt(st.colonists) .. " / " .. fmt(need.colonists) ..
+      "Rocket " .. ((site.launches or 0) + 1) .. ": " .. icon("fd-passengers") .. " " .. fmt(st.colonists) .. " / " .. fmt(need.colonists) ..
         ", " .. icon("fd-mail") .. " " .. fmt(st.mail) .. " / " .. fmt(need.mail) ..
         ", " .. icon("fd-goods") .. " " .. fmt(st.goods) .. " / " .. fmt(need.goods) ..
         ", " .. money_short(st.paid) .. " / " .. money_short(need.cost),
@@ -583,27 +613,24 @@ function M.site_detail(site)
   if site.kind == "spaceport" then
     local need, st = pad_need(site), pad_state(site)
     local s
-    if st.paid < need.cost - 0.5 then
-      local left = math.ceil(pad_minutes_left(site))
-      if storage.pad_paused then
-        s = "Paused (Spaceport window)"
-      elseif st.waiting_cash then
-        s = "Waiting for cash above your " .. money_short(pad_reserve()) .. " reserve"
-      else
-        s = "Assembling: " .. left .. " min left"
-      end
+    local miss = {}
+    if st.colonists < need.colonists then table.insert(miss, fmt(need.colonists - st.colonists) .. " " .. icon("fd-passengers")) end
+    if st.mail < need.mail then table.insert(miss, fmt(need.mail - st.mail) .. " " .. icon("fd-mail")) end
+    if st.goods < need.goods then table.insert(miss, fmt(need.goods - st.goods) .. " " .. icon("fd-goods")) end
+    local pct = math.floor(100 * st.paid / math.max(1, need.cost))
+    if storage.pad_paused then
+      s = "Paused (Spaceport window)"
+    elseif st.waiting_cash then
+      s = "Waiting for cash above your " .. money_short(pad_reserve()) .. " reserve"
+    elseif #miss > 0 then
+      -- 0.7.7: assembly follows the cargo
+      s = "Assembled " .. pct .. "%: waiting for " .. table.concat(miss, ", ")
+    elseif st.paid < need.cost - 0.5 then
+      local secs = math.ceil(pad_minutes_left(site) * 60)
+      s = "Loaded, assembling: " .. (secs >= 90 and (math.ceil(secs / 60) .. " min") or (secs .. " s")) .. " left"
     else
-      local miss = {}
-      if st.colonists < need.colonists then table.insert(miss, fmt(need.colonists - st.colonists) .. " " .. icon("fd-passengers")) end
-      if st.mail < need.mail then table.insert(miss, fmt(need.mail - st.mail) .. " " .. icon("fd-mail")) end
-      if st.goods < need.goods then table.insert(miss, fmt(need.goods - st.goods) .. " " .. icon("fd-goods")) end
-      if #miss == 0 then
-        s = "Rocket rolling out: launching soon"
-      else
-        s = "Rocket built: waiting for " .. table.concat(miss, ", ")
-      end
+      s = "Rocket rolling out: launching soon"
     end
-    if (storage.rockets or 0) > 0 then table.insert(m, string.format("satellites x%.2f", sat_mult())) end
     local at = C.SPACEPORT.level_at[site.level]
     local nl = at and ("Next level after launch " .. at) or "Top level"
     return s .. mults(m) .. SEP .. nl
@@ -619,14 +646,16 @@ function M.site_detail(site)
         "%), " .. per
     end
     power_part(site, m)
+    if sat_mult() > 1 then table.insert(m, string.format("satellites x%.2f", sat_mult())) end
     return s .. mults(m)
   elseif site.kind == "power-plant" then
     local r = fmt(supply_radius(site))
     local s
     if plant_running(site) then
       local n = site.powering or 0
-      s = "Running: powering " .. n .. " site" .. (n == 1 and "" or "s") .. " within " .. r .. " tiles" ..
-        mults({ string.format("power x%.2f", 1 + C.POWER.bonus) })
+      local pm = { string.format("power x%.2f", 1 + C.POWER.bonus) }
+      if sat_mult() > 1 then table.insert(pm, string.format("satellites reach x%.2f", sat_mult())) end
+      s = "Running: powering " .. n .. " site" .. (n == 1 and "" or "s") .. " within " .. r .. " tiles" .. mults(pm)
     else
       s = "Out of fuel: needs " .. icon("fd-coal") .. " or " .. icon("fd-wood") .. " to power sites within " .. r .. " tiles"
     end
@@ -787,6 +816,7 @@ local function spot_ok(kind, x, y, min_d)
     local d = dist(x, y, s.x, s.y)
     if d < min_d then return false end
     if kind == "town" and s.kind == "town" and d < C.TOWN_MIN_DIST then return false end
+    if kind == "spaceport" and s.kind == "spaceport" and d < C.SPACEPORT.pad_min_dist then return false end
   end
   return true
 end
@@ -952,7 +982,7 @@ local function found_site(force_kind)
   local x, y = bx, by
   if not force_kind then storage.found_kind = nil end
   local site = create_site(kind, x, y)
-  if kind == "spaceport" then storage.spaceport_id = site.id end
+  if kind == "spaceport" and not (storage.spaceport_id and storage.sites[storage.spaceport_id]) then storage.spaceport_id = site.id end
   local near, nd = nil, nil
   for id in pairs(served) do
     local s = storage.sites[id]
@@ -970,12 +1000,21 @@ end
 M.found_site = found_site
 
 local function maybe_found_site()
-  -- end game (0.7.0): the last rank founds the one Spaceport, outside the usual pacing and cap
+  -- end game (0.7.0): Railway Tycoon founds the first Spaceport, outside the usual pacing and cap
   if storage.pad_wanted and not M.spaceport() then
     if found_site("spaceport") then
       storage.pad_wanted = nil
       game.print("[color=cyan]Serve it with a stop and bring colonists ([item=fd-passengers] passengers), [item=fd-mail] mail and [item=fd-goods] goods: " ..
-        "every rocket you launch adds a satellite, and each one raises every fare by 2%. Open the Spaceport window from your HUD.[/color]")
+        "a rocket launches as soon as it's loaded and paid. Every launch adds a satellite: +" ..
+        math.floor(C.SPACEPORT.satellite * 100 + 0.5) .. "% town passengers and mail, and power plant reach. Open the Spaceport window from your HUD.[/color]")
+    end
+    return
+  end
+  -- 0.7.8: a Spaceport bought in the Shop
+  if (storage.pads_pending or 0) > 0 then
+    if found_site("spaceport") then
+      storage.pads_pending = storage.pads_pending - 1
+      game.print("[color=cyan]Your new Spaceport is ready for trains. Each Spaceport builds its own rockets.[/color]")
     end
     return
   end
@@ -1054,7 +1093,7 @@ local function site_signals(s)
   if s.kind == "town" then add("virtual", "signal-P", s.pop) else add("virtual", "signal-L", s.level) end
   if s.kind == "power-plant" then add("virtual", "signal-F", s.fuel) end
   if s.kind == "spaceport" then
-    -- P / M / G: colonists, mail and goods still needed, T: minutes of assembly left, C: cash in $1,000s
+    -- P / M / G: colonists, mail and goods still needed, T: minutes of assembly left once loaded, C: cash in $1,000s
     add("virtual", "signal-P", pad_room(s, "fd-passengers"))
     add("virtual", "signal-M", pad_room(s, "fd-mail"))
     add("virtual", "signal-G", pad_room(s, "fd-goods"))
@@ -1204,7 +1243,7 @@ local function payment(rec, site, item, amount)
   if transit > grace then
     tf = math.max(0.25, 1 - (transit - grace) / cargo.decay)
   end
-  return amount * cargo.rate * d / 100 * tf * sat_mult(), d, tf
+  return amount * cargo.rate * d / 100 * tf, d, tf
 end
 
 -- A stop whose current wait condition includes "Empty cargo" is a drop-off stop:
@@ -1449,7 +1488,7 @@ local function launch_rocket(site, silo)
   game.print("[color=cyan][font=default-large-bold]Rocket " .. n .. " launched from " .. site_title(site) .. "![/font][/color] " ..
     fmt(need.colonists) .. " [item=fd-passengers] colonists, " .. fmt(need.mail) .. " [item=fd-mail] mail and " ..
     fmt(need.goods) .. " [item=fd-goods] goods are on their way. " ..
-    string.format("Satellite network: every fare +%d%%.", math.floor((sat_mult() - 1) * 100 + 0.5)) ..
+    string.format("Satellite network: town passengers and mail, and power plant reach, +%d%%.", math.floor((sat_mult() - 1) * 100 + 0.5)) ..
     " [gps=" .. site.x .. "," .. site.y .. "," .. C.SURFACE .. "]")
   local at = C.SPACEPORT.level_at[site.level]
   if at and site.launches >= at then
@@ -1487,14 +1526,21 @@ local function animate_launches()
   storage.launch_anims = keep
 end
 
--- Assembly: pay the build cost a little each second (never below the reserve), then launch once
--- the cost is paid and the colonists, mail and goods are aboard.
+-- Assembly: pay the build cost a little each second (never below the reserve, and since 0.7.7
+-- only up to the share of cargo aboard), then launch once the cost is paid and the colonists,
+-- mail and goods are aboard. Fully loaded, a rocket takes build_secs.
 local function update_spaceport(site)
   local st = pad_state(site)
   local need = pad_need(site)
   st.waiting_cash = false
-  if not storage.pad_paused and st.paid < need.cost then
-    local want = math.min(pad_rate(site), need.cost - st.paid)
+  if st.paid > need.cost then
+    -- 0.7.7 lowered the costs: refund what an older save already paid above the new cost
+    storage.money = storage.money + (st.paid - need.cost)
+    st.paid = need.cost
+  end
+  local target = need.cost * pad_cargo_frac(site)
+  if not storage.pad_paused and st.paid < target then
+    local want = math.min(pad_rate(site), target - st.paid)
     local pay = math.max(0, math.min(want, storage.money - pad_reserve()))
     if pay > 0 then
       storage.money = storage.money - pay
@@ -1531,8 +1577,8 @@ local function simulate_second()
     local cap = C.STOCK_CAP * site.level
     fl_add(site, "secs", 1)
     if site.kind == "town" then
-      local pax = site.pop / C.PAX_PER_POP * service
-      local mail = site.pop / 400 * service
+      local pax = site.pop / C.PAX_PER_POP * service * sat_mult()
+      local mail = site.pop / 400 * service * sat_mult()
       cap = C.STOCK_CAP + site.pop * 4
       local p0, m0 = site.stock["fd-passengers"] or 0, site.stock["fd-mail"] or 0
       site.stock["fd-passengers"] = math.min(cap, p0 + pax)
@@ -1804,6 +1850,29 @@ local function place_all_eyes()
 end
 M.place_all_eyes = place_all_eyes
 
+-- 0.7.8: buy another Spaceport (Shop, after the free first one). It's founded like any site,
+-- at least C.SPACEPORT.pad_min_dist tiles from the others, within a few seconds.
+function M.buy_pad(player)
+  local out = player or game
+  if not M.spaceport() then
+    out.print("[color=red]Your first Spaceport comes free with the rank of " .. C.RANKS[C.PAD_RANK].title .. ".[/color]")
+    return false
+  end
+  if (storage.pads_pending or 0) > 0 then
+    out.print("[color=yellow]A Spaceport is already being founded.[/color]")
+    return false
+  end
+  local price = M.pad_price()
+  if not spend(price) then
+    out.print("[color=red]A new Spaceport costs " .. M.money_str(price) .. ". Not enough money.[/color]")
+    return false
+  end
+  storage.pads_bought = (storage.pads_bought or 0) + 1
+  storage.pads_pending = (storage.pads_pending or 0) + 1
+  game.print("[color=green][font=default-bold]Spaceport bought[/font][/color] for " .. M.money_str(price) .. ". Surveyors are choosing a site...")
+  return true
+end
+
 function M.survey(player)
   local cost = C.SURVEY_PRICE
   if not spend(cost) then
@@ -1996,6 +2065,9 @@ local function new_contract()
   -- bonus = what the cargo would earn over 1,200 tiles (freight) or 600 tiles (town cargo),
   -- rounded to $100. Freight: double the amount and double the rate (0.3.0).
   local reward = math.floor(amount * C.CARGO[c.item].rate * (freight and 12 or 6) / 100) * 100
+  -- 0.7.8: at least C.CONTRACT_INCOME_MINS minutes of recent income, so they still matter late
+  local floor = math.floor(M.recent_income_per_min() * C.CONTRACT_INCOME_MINS / 10000) * 10000
+  reward = math.max(reward, floor)
   table.insert(storage.contracts, {
     site_id = c.site.id, item = c.item, amount = amount, delivered = 0,
     deadline = game.tick + C.CONTRACT_TICKS, reward = reward,
@@ -2028,10 +2100,11 @@ end
 -- Ranks
 ---------------------------------------------------------------------------
 
+-- ranks are reached in order: lifetime earnings, and (0.7.9 space ranks) rockets launched
 function M.rank()
   local idx = 1
   for i, r in ipairs(C.RANKS) do
-    if storage.lifetime >= r.at then idx = i end
+    if storage.lifetime >= r.at and (storage.rockets or 0) >= (r.rockets or 0) then idx = i else break end
   end
   return idx
 end
@@ -2042,9 +2115,9 @@ local function check_rank()
     storage.rank = r
     local rk = C.RANKS[r]
     game.print("[color=yellow][font=default-large-bold]Promotion! You are now: " .. rk.title .. "[/font][/color]")
+    if r >= C.PAD_RANK and not M.spaceport() then storage.pad_wanted = true end
     if r == #C.RANKS then
-      game.print("[color=green][font=default-large-bold]You built a railway empire. You win! (Keep playing if you like.)[/font][/color]")
-      if not M.spaceport() then storage.pad_wanted = true end
+      game.print("[color=green][font=default-large-bold]Your railway reaches the stars. You win! (Keep playing if you like.)[/font][/color]")
     end
   end
 end
@@ -2187,10 +2260,10 @@ script.on_configuration_changed(function()
     relayout_towns()
     -- paint any train still in default red (all trains in saves from before 0.3.5)
     for _, t in pairs(game.train_manager.get_trains({ surface = game.surfaces[C.SURFACE] })) do paint_train(t) end
-    -- 0.7.0: a save already at the last rank gets its Spaceport
-    if M.rank() == #C.RANKS and not M.spaceport() then storage.pad_wanted = true end
+    -- 0.7.0: a save already at Railway Tycoon gets its Spaceport
+    if M.rank() >= C.PAD_RANK and not M.spaceport() then storage.pad_wanted = true end
     -- 0.7.4: the Spaceport's picture becomes a real silo (doors and rocket animate)
-    if M.spaceport() then ensure_pad_silo(M.spaceport()) end
+    for _, pad in pairs(M.spaceports()) do ensure_pad_silo(pad) end
     -- 0.7.6: no fog of war over anything already charted
     place_all_eyes()
     no_silo_victory()
@@ -2408,6 +2481,17 @@ script.on_nth_tick(60, function(e)
   if e.tick % 3600 == 0 then simulate_minute() end
   for _, p in pairs(game.connected_players) do gui.update(p) end
 end)
+
+-- average income over the last 10-minute income_log interval (steadier than the HUD's last
+-- minute); the HUD figure until two log entries exist
+function M.recent_income_per_min()
+  local log = storage.income_log or {}
+  local a, b = log[#log - 1], log[#log]
+  if a and b and b.tick > a.tick then
+    return math.max(0, (b.lifetime - a.lifetime) / ((b.tick - a.tick) / 3600))
+  end
+  return M.income_per_min()
+end
 
 function M.income_per_min()
   local t = 0
@@ -2785,7 +2869,15 @@ remote.add_interface("freight_dispatch", {
       reserve = pad_reserve(), paused = storage.pad_paused, money = storage.money,
       status = s and M.site_status(s), detail = s and M.site_detail(s), signals = s and M.site_signals(s) }
   end,
-  set_pad = function(t) local s = M.spaceport(); for k, v in pairs(t) do pad_state(s)[k] = v end end,
+  set_pad = function(t, id) local s = id and storage.sites[id] or M.spaceport(); for k, v in pairs(t) do pad_state(s)[k] = v end end,
+  spaceports = function()
+    local out = {}
+    for _, s in pairs(M.spaceports()) do
+      table.insert(out, { id = s.id, name = s.name, x = s.x, y = s.y, level = s.level, launches = s.launches, status = M.site_status(s), detail = M.site_detail(s) })
+    end
+    return { pads = out, bought = storage.pads_bought or 0, pending = storage.pads_pending or 0, price = M.pad_price(), rockets = storage.rockets or 0, sat = sat_mult() }
+  end,
+  buy_pad = function() return M.buy_pad(nil) end,
   set_pad_reserve = function(i) storage.pad_reserve = i end,
   eyes = function() return M.place_all_eyes() end,
   -- Supply chain analysis as plain data (dev hook)
@@ -2812,6 +2904,7 @@ remote.add_interface("freight_dispatch", {
   stats = function()
     return { money = storage.money, lifetime = storage.lifetime, sites = table_size(storage.sites),
       contracts = #storage.contracts, deliveries = storage.deliveries or 0, fuel_spent = storage.fuel_spent or 0,
-      earned_item = storage.earned_item or {}, upgrades = storage.upgrades }
+      earned_item = storage.earned_item or {}, upgrades = storage.upgrades,
+      rank = M.rank(), rank_title = C.RANKS[M.rank()].title, rockets = storage.rockets or 0 }
   end,
 })

@@ -21,7 +21,7 @@ Whenever fewer than 6 sites are unserved, a new one is founded 280-700 tiles fro
 
 [font=default-bold]Supply chain window[/font] (HUD button) shows, for each cargo, what your served sites made, delivered and could use per second over the last 10 minutes, and whether anything runs short. [color=#ff6060]SHORT[/color] says why: not enough made, held back by an earlier cargo, a producer at full speed, or pickups that can't keep up (a full pile, or a site not visited every minute). [color=yellow]BACKED UP[/color] means a pile keeps filling up. "Next step" names the one fix that helps most, often a spare site to connect.
 
-[font=default-bold]Spaceport (end game)[/font] Reaching the last rank founds a Spaceport. Each rocket needs colonists ([item=fd-passengers] passengers), [item=fd-mail] mail and [item=fd-goods] goods brought by train (normal fares), and 10 minutes of assembly paid as it goes. Assembly waits whenever paying would take your cash below the reserve you set in the Spaceport window. Every launch adds a satellite: +2% on every fare, up to +50%. The pad levels up after launches 3, 8, 15 and 25: bigger rockets, more cargo, higher cost. Site signals there output [virtual-signal=signal-P] colonists, [virtual-signal=signal-M] mail and [virtual-signal=signal-G] goods still needed, [virtual-signal=signal-T] minutes of assembly left and [virtual-signal=signal-C] your cash in $1,000s. Tip: middle-click a wagon slot to filter it to one cargo (e.g. half [item=fd-passengers], half [item=fd-mail]), so a Spaceport train always brings both.
+[font=default-bold]Spaceport (end game)[/font] Reaching Railway Tycoon founds a Spaceport. From there, ranks come from rockets launched (all Spaceports together): 1, 5, 10, 20, 35 and 50, the last one wins the game. Each rocket needs colonists ([item=fd-passengers] passengers), [item=fd-mail] mail and [item=fd-goods] goods brought by train (normal fares), and cash. Assembly is paid as the cargo arrives (half the cargo aboard, half the rocket built), and a fully loaded rocket takes at least 3 minutes, so the faster your trains fill it, the more rockets you launch. Assembly waits whenever paying would take your cash below the reserve you set in the Spaceport window. Every launch adds a satellite: +1% town passengers and mail and +1% power plant supply radius, up to +50%. After your first (free) Spaceport you can buy more in the Spaceport window; each is founded at least 700 tiles from the others and builds its own rockets. The pad levels up after launches 3, 8, 15 and 25: bigger rockets, more cargo, higher cost. Site signals there output [virtual-signal=signal-P] colonists, [virtual-signal=signal-M] mail and [virtual-signal=signal-G] goods still needed, [virtual-signal=signal-T] minutes of assembly left once loaded and [virtual-signal=signal-C] your cash in $1,000s. Tip: middle-click a wagon slot to filter it to one cargo (e.g. half [item=fd-passengers], half [item=fd-mail]), so a Spaceport train always brings both.
 
 [font=default-bold]Sites[/font]
 [item=fd-passengers] [font=default-bold]Town[/font]
@@ -104,8 +104,15 @@ function G.update(player)
   local rk = C.RANKS[r]
   local nxt = C.RANKS[r + 1]
   if nxt then
-    f.rank.caption = "Rank: [color=yellow]" .. rk.title .. "[/color]  (next: " .. nxt.title .. " at " .. M.money_str(nxt.at) .. " earned)"
-    f.rank_bar.value = math.min(1, (storage.lifetime - rk.at) / (nxt.at - rk.at))
+    if nxt.rockets then
+      -- 0.7.9 space ranks: progress in rockets launched
+      local have, from = storage.rockets or 0, rk.rockets or 0
+      f.rank.caption = "Rank: [color=yellow]" .. rk.title .. "[/color]  (next: " .. nxt.title .. " at " .. nxt.rockets .. " rockets)"
+      f.rank_bar.value = math.max(0, math.min(1, (have - from) / math.max(1, nxt.rockets - from)))
+    else
+      f.rank.caption = "Rank: [color=yellow]" .. rk.title .. "[/color]  (next: " .. nxt.title .. " at " .. M.money_str(nxt.at) .. " earned)"
+      f.rank_bar.value = math.min(1, (storage.lifetime - rk.at) / (nxt.at - rk.at))
+    end
   else
     f.rank.caption = "Rank: [color=yellow]" .. rk.title .. "[/color]  - you won!"
     f.rank_bar.value = 1
@@ -115,7 +122,7 @@ function G.update(player)
     f.rockets.visible = pad ~= nil
     if pad then
       f.rockets.caption = "[item=rocket-silo] Rockets launched: " .. (storage.rockets or 0) ..
-        string.format("  (satellites: fares x%.2f)", M.sat_mult())
+        string.format("  (satellites x%.2f)", M.sat_mult())
     end
   end
   if f.buttons and f.buttons.pad then f.buttons.pad.visible = pad ~= nil end
@@ -212,6 +219,21 @@ local function build_shop(player)
     local b = ut.add({ type = "button", caption = nxt and M.money_str(nxt.price) or "Max", tags = { fd = "upgrade", id = u.id },
       tooltip = nxt and ("Buy " .. nxt.name) or nil })
     b.enabled = nxt ~= nil and storage.money >= nxt.price
+  end
+  -- 0.7.8: more Spaceports, once the free first one exists
+  if M.spaceport() then
+    inner.add({ type = "line" })
+    local pf = inner.add({ type = "flow", direction = "horizontal" })
+    pf.style.vertical_align = "center"
+    pf.add({ type = "sprite", sprite = "item/rocket-silo" })
+    local pl = pf.add({ type = "label", caption = "Spaceport: [color=yellow]" .. #M.spaceports() .. " built[/color]" })
+    pl.style.minimal_width = 230
+    local pending = (storage.pads_pending or 0) > 0
+    local price = M.pad_price()
+    local pb = pf.add({ type = "button", caption = pending and "Choosing a site..." or ("Buy another (" .. M.money_str(price) .. ")"),
+      tags = { fd = "buy_pad" },
+      tooltip = "Founded somewhere on the map, at least " .. M.fmt(C.SPACEPORT.pad_min_dist) .. " tiles from your other Spaceports. It builds its own rockets; satellites are shared." })
+    pb.enabled = not pending and storage.money >= price
   end
   inner.add({ type = "line" })
   inner.add({ type = "button", caption = "Sell back shop items in my inventory (75%)", tags = { fd = "sell" } })
@@ -375,13 +397,15 @@ local function build_chain(player)
       "delivered " .. rate(tw.pax.got) .. "/s", "carried " .. rate(tw.pax.carried) .. "/s")
     header("[item=fd-mail] [font=default-bold]Mail[/font]", "made " .. rate(tw.mail.made) .. "/s",
       "delivered " .. rate(tw.mail.got) .. "/s", "carried " .. rate(tw.mail.carried) .. "/s")
-    local pad = M.spaceport()
-    if pad then
-      local need, st = M.pad_need(pad), M.pad_state(pad)
+    local pads = M.spaceports()
+    if #pads > 0 then
       local t = site_table(sp)
-      site_row(t, "Pad", pad, "", "rocket " .. ((storage.rockets or 0) + 1) .. ": [item=fd-passengers] " .. M.fmt(st.colonists) .. " / " ..
-        M.fmt(need.colonists) .. ", [item=fd-mail] " .. M.fmt(st.mail) .. " / " .. M.fmt(need.mail) ..
-        ", [item=fd-goods] " .. M.fmt(st.goods) .. " / " .. M.fmt(need.goods))
+      for i, pad in ipairs(pads) do
+        local need, st = M.pad_need(pad), M.pad_state(pad)
+        site_row(t, i == 1 and "Pad" or "", pad, "", "rocket: [item=fd-passengers] " .. M.fmt(st.colonists) .. " / " ..
+          M.fmt(need.colonists) .. ", [item=fd-mail] " .. M.fmt(st.mail) .. " / " .. M.fmt(need.mail) ..
+          ", [item=fd-goods] " .. M.fmt(st.goods) .. " / " .. M.fmt(need.goods))
+      end
     end
     if #tw.full > 0 and not measuring then
       local t = site_table(sp)
@@ -405,34 +429,41 @@ local function build_chain(player)
   foot.style.maximal_width = 680
 end
 
--- Spaceport window (0.7.0): progress of the rocket being built, cash reserve, pause.
+-- Spaceport window (0.7.0): progress of the rocket being built at each pad (0.7.8: all of
+-- them), cash reserve, pause, and buying another pad.
 local function build_pad(player)
-  local s = M.spaceport()
-  if not s then return end
-  local f = open_window(player, "fd_pad", "Spaceport")
+  local pads = M.spaceports()
+  if #pads == 0 then return end
+  local f = open_window(player, "fd_pad", "Spaceport" .. (#pads > 1 and "s" or ""))
   if not f then return end
-  local inner = f.add({ type = "frame", style = "inside_shallow_frame_with_padding", direction = "vertical" })
+  local outer = f.add({ type = "scroll-pane", direction = "vertical" })
+  outer.style.maximal_height = 760
+  local inner = outer.add({ type = "frame", style = "inside_shallow_frame_with_padding", direction = "vertical" })
   inner.style.minimal_width = 560
-  site_button(inner, s)
-  local need, st = M.pad_need(s), M.pad_state(s)
-  inner.add({ type = "label", caption = "[font=default-bold]Rocket " .. ((storage.rockets or 0) + 1) .. "[/font]  (Spaceport level " .. s.level .. ")" })
-  local function bar(caption, have, want)
-    local fl = inner.add({ type = "flow", direction = "horizontal" })
-    fl.style.vertical_align = "center"
-    local l = fl.add({ type = "label", caption = caption })
-    l.style.width = 220
-    local pb = fl.add({ type = "progressbar", value = math.min(1, have / math.max(1, want)) })
-    pb.style.width = 300
+  for i, s in ipairs(pads) do
+    if i > 1 then inner.add({ type = "line" }) end
+    site_button(inner, s)
+    local need, st = M.pad_need(s), M.pad_state(s)
+    inner.add({ type = "label", caption = "[font=default-bold]Level " .. s.level .. "[/font]  (" .. (s.launches or 0) .. " launched here)" })
+    local function bar(caption, have, want)
+      local fl = inner.add({ type = "flow", direction = "horizontal" })
+      fl.style.vertical_align = "center"
+      local l = fl.add({ type = "label", caption = caption })
+      l.style.width = 220
+      local pb = fl.add({ type = "progressbar", value = math.min(1, have / math.max(1, want)) })
+      pb.style.width = 300
+    end
+    bar("[item=fd-passengers] Colonists " .. M.fmt(st.colonists) .. " / " .. M.fmt(need.colonists), st.colonists, need.colonists)
+    bar("[item=fd-mail] Mail " .. M.fmt(st.mail) .. " / " .. M.fmt(need.mail), st.mail, need.mail)
+    bar("[item=fd-goods] Goods " .. M.fmt(st.goods) .. " / " .. M.fmt(need.goods), st.goods, need.goods)
+    bar("Assembly " .. M.money_short(st.paid) .. " / " .. M.money_short(need.cost), st.paid, need.cost)
+    local d = inner.add({ type = "label", caption = "[color=#d8d8b0]" .. (M.site_detail(s) or "") .. "[/color]" })
+    d.style.single_line = false
+    d.style.maximal_width = 540
   end
-  bar("[item=fd-passengers] Colonists " .. M.fmt(st.colonists) .. " / " .. M.fmt(need.colonists), st.colonists, need.colonists)
-  bar("[item=fd-mail] Mail " .. M.fmt(st.mail) .. " / " .. M.fmt(need.mail), st.mail, need.mail)
-  bar("[item=fd-goods] Goods " .. M.fmt(st.goods) .. " / " .. M.fmt(need.goods), st.goods, need.goods)
-  bar("Assembly " .. M.money_short(st.paid) .. " / " .. M.money_short(need.cost), st.paid, need.cost)
-  local d = inner.add({ type = "label", caption = "[color=#d8d8b0]" .. (M.site_detail(s) or "") .. "[/color]" })
-  d.style.single_line = false
   inner.add({ type = "line" })
   local run = inner.add({ type = "checkbox", caption = "Assemble rockets", state = not storage.pad_paused,
-    tags = { fd = "pad_run" }, tooltip = "Untick to pause. Nothing is lost while paused." })
+    tags = { fd = "pad_run" }, tooltip = "Untick to pause every Spaceport. Nothing is lost while paused." })
   local fl = inner.add({ type = "flow", direction = "horizontal" })
   fl.style.vertical_align = "center"
   fl.add({ type = "label", caption = "Keep at least" })
@@ -442,13 +473,21 @@ local function build_pad(player)
     tags = { fd = "pad_reserve" } })
   fl.add({ type = "label", caption = "in cash: assembly waits whenever paying would go below it." })
   local n = storage.rockets or 0
-  local info = inner.add({ type = "label", caption = "[color=gray]Assembly takes " .. math.floor(C.SPACEPORT.build_secs / 60) ..
-    " min and is paid as it goes. The rocket launches once it's built and its colonists, mail and goods are aboard. " ..
+  local pct = math.floor((M.sat_mult() - 1) * 100 + 0.5)
+  local info = inner.add({ type = "label", caption = "[color=gray]Assembly is paid as the cargo arrives and takes at least " .. math.floor(C.SPACEPORT.build_secs / 60) ..
+    " min. A rocket launches as soon as it's built and its colonists, mail and goods are aboard. " ..
     "Deliveries pay their normal fare on arrival; trains keep anything the rocket doesn't need yet.\n" ..
-    "Satellites: " .. n .. " launched, every fare x" .. string.format("%.2f", M.sat_mult()) ..
-    " (+" .. math.floor(C.SPACEPORT.satellite * 100) .. "% per launch, up to +" .. math.floor(C.SPACEPORT.satellite_cap * 100) .. "%).[/color]" })
+    "Satellites: " .. n .. " launched, +" .. pct .. "% town passengers and mail, and +" .. pct .. "% power plant reach (" ..
+    math.floor(C.SPACEPORT.satellite * 100 + 0.5) .. "% per launch, up to +" .. math.floor(C.SPACEPORT.satellite_cap * 100) .. "%).[/color]" })
   info.style.single_line = false
   info.style.maximal_width = 540
+  inner.add({ type = "line" })
+  local pending = (storage.pads_pending or 0) > 0
+  local price = M.pad_price()
+  local bb = inner.add({ type = "button", caption = pending and "New Spaceport: choosing a site..." or ("Buy another Spaceport (" .. M.money_str(price) .. ")"),
+    tags = { fd = "buy_pad" },
+    tooltip = "Founded somewhere on the map, at least " .. M.fmt(C.SPACEPORT.pad_min_dist) .. " tiles from your other Spaceports. It builds its own rockets; satellites are shared." })
+  bb.enabled = not pending and storage.money >= price
 end
 
 local function build_help(player)
@@ -512,6 +551,11 @@ script.on_event(defines.events.on_gui_click, function(e)
   elseif a == "sites" then build_chain(player)
   elseif a == "help" then build_help(player)
   elseif a == "pad" then build_pad(player)
+  elseif a == "buy_pad" then
+    M.buy_pad(player)
+    local scr = player.gui.screen
+    if scr.fd_pad then scr.fd_pad.destroy(); build_pad(player)
+    elseif scr.fd_shop then scr.fd_shop.destroy(); build_shop(player) end
   elseif a == "close" then
     local w = player.gui.screen[tags.win]
     if w then w.destroy() end

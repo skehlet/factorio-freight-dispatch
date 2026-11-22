@@ -46,6 +46,7 @@ C.SURVEY_PRICE = 5000      -- Shop "Land survey"
 C.SURVEY_RADIUS = 256      -- reveals a 512 x 512 area around your view
 C.CONTRACT_TICKS = 30 * 60 * 60
 C.CONTRACT_GAP = 4 * 60 * 60
+C.CONTRACT_INCOME_MINS = 3 -- 0.7.8: a reward is at least this many minutes of recent income
 
 -- Shop prices (per item)
 C.PRICES = {
@@ -173,7 +174,7 @@ C.KINDS = {
     label = "Power Plant", icon = "fd-coal", radius = 18, color = { 1, 0.6, 1 },
     produces = {}, accepts = { "fd-coal", "fd-wood" },
   },
-  -- 0.7.0 end game: founded once at the last rank. Not in KIND_ORDER, KIND_WEIGHTS or
+  -- 0.7.0 end game: founded once at Railway Tycoon (C.PAD_RANK). Not in KIND_ORDER, KIND_WEIGHTS or
   -- FOUND_TIERS, so normal founding never picks it.
   ["spaceport"] = {
     label = "Spaceport", icon = "rocket-silo", radius = 22, color = { 0.6, 0.9, 1 },
@@ -183,25 +184,34 @@ C.KINDS = {
 
 -- Spaceport (0.7.0, Steve's end game): a rocket needs colonists (passengers), mail and (0.7.1)
 -- goods as cargo delivered
--- by train (normal fares) and cash, paid during a fixed assembly time and paused while cash is
--- at or below the reserve the player sets. It launches when all three are done; the next one
+-- by train (normal fares) and cash, paid as the cargo arrives (0.7.7; at most cost / build_secs
+-- per second) and paused while cash is at or below the reserve the player sets. It launches when all three are done; the next one
 -- starts at once. The pad levels up from launches (level N from launch level_at[N-1] + 1), and
 -- each launch adds `satellite` to every fare, up to `satellite_cap`.
 C.SPACEPORT = {
-  build_secs = 10 * 60, -- 0.7.1: was 15 min
-  -- 0.7.1: mail 500 -> 1,000 (half the colonists; towns make 0.3 mail per passenger, and fair-share
-  -- loading carries them about 1:1), and goods added: 20k is about one 4-wagon train at 120 slots,
-  -- a few percent of a level-5 factory's output over the 10 min build
+  -- 0.7.7 (Steve, at 11 launches: the pad was full with 5 min still on the clock, so trains
+  -- made no difference): assembly follows the cargo. Cash is paid only up to the share of cargo
+  -- aboard, and at most cost / build_secs per second, so a rocket launches as soon as it's loaded
+  -- and paid, but never in under 3 min. Cargo is 2x to 2.5x the 0.7.1 amounts (L5 goods are about
+  -- 85% of a level-5 factory's output at the 3 min pace) and cost is lower, since launches can
+  -- now come every 3 to 5 min instead of 10 (his end game income was about $2.5M/min).
+  -- 0.7.1: build_secs 10 min (was 15); mail half the colonists; goods added.
+  build_secs = 3 * 60,
   levels = {
-    { colonists = 2000, mail = 1000, goods = 20000, cost = 10000000 },
-    { colonists = 3000, mail = 1500, goods = 30000, cost = 14000000 },
-    { colonists = 4000, mail = 2000, goods = 40000, cost = 18000000 },
-    { colonists = 5000, mail = 2500, goods = 50000, cost = 22000000 },
-    { colonists = 6000, mail = 3000, goods = 60000, cost = 26000000 },
+    { colonists = 4000, mail = 2000, goods = 24000, cost = 4000000 },
+    { colonists = 6000, mail = 3000, goods = 36000, cost = 5000000 },
+    { colonists = 8000, mail = 4000, goods = 48000, cost = 6000000 },
+    { colonists = 10000, mail = 5000, goods = 60000, cost = 7000000 },
+    { colonists = 12000, mail = 6000, goods = 72000, cost = 8000000 },
   },
   level_at = { 3, 8, 15, 25 }, -- launches done to reach level 2, 3, 4, 5
-  satellite = 0.02,            -- +2% on every fare per launch
-  satellite_cap = 0.5,         -- reached at 25 launches
+  -- 0.7.8 (Steve): satellites multiply town passengers and mail and power plant supply radius
+  -- instead of fares. 1% per launch (was 2%) because rockets now come about twice as often.
+  satellite = 0.01,
+  satellite_cap = 0.5,         -- reached at 50 launches
+  -- 0.7.8: more Spaceports from the Shop after the free first one; doubling after the list
+  buy_prices = { 25000000, 50000000, 100000000 },
+  pad_min_dist = 700,          -- tiles between Spaceports
   reserves = { 0, 1000000, 2000000, 5000000, 10000000, 25000000, 50000000 },
   default_reserve = 3,         -- index into reserves ($2M)
 }
@@ -270,7 +280,17 @@ C.RANKS = {
   { at = 5000000, title = "Line Manager" },
   { at = 20000000, title = "Rail Baron" },
   { at = 100000000, title = "Railway Tycoon" },
+  -- 0.7.9 (Steve): space ranks by rockets launched (all Spaceports together). Railway Tycoon
+  -- founds the first Spaceport; "you win" waits for the last rank, where the satellite bonus
+  -- tops out (+50% at 50 launches).
+  { at = 100000000, rockets = 1, title = "Launch Dispatcher" },
+  { at = 100000000, rockets = 5, title = "Orbital Line Manager" },
+  { at = 100000000, rockets = 10, title = "Space Freight Baron" },
+  { at = 100000000, rockets = 20, title = "Starport Tycoon" },
+  { at = 100000000, rockets = 35, title = "Orbital Railway Magnate" },
+  { at = 100000000, rockets = 50, title = "Interplanetary Rail Legend" },
 }
+C.PAD_RANK = 6 -- Railway Tycoon: reaching it founds the first Spaceport
 
 C.NAME_PREFIX = {
   "Ash", "Brook", "Cedar", "Dun", "Elm", "Fair", "Glen", "Hart", "Iron", "Kings", "Lake", "Mill",
