@@ -38,6 +38,9 @@ for _, c in pairs(cargo) do
       subgroup = "fd-cargo",
       order = c.order,
       stack_size = 50,
+      -- 0.7.3: listed in wagon slot filters (middle click). Filter pickers only show unlocked
+      -- items, and these have no recipe, so without this they never appear there.
+      flags = { "always-show" },
     },
   })
 end

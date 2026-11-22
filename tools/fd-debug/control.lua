@@ -19,6 +19,24 @@ end
 
 script.on_init(function()
   remote.call("freight_dispatch", "debug_dump")
+  -- 0.7.3 check: cargo items carry always-show, and a filtered slot takes only its cargo
+  do
+    local f = prototypes.item["fd-mail"].flags or {}
+    local out = { "always-show=" .. tostring(f["always-show"] == true) }
+    -- borrow an empty wagon from the save copy, filter it all to mail, try both, then undo
+    for _, w in pairs(game.surfaces["freight"].find_entities_filtered({ type = "cargo-wagon" })) do
+      local inv = w.get_inventory(defines.inventory.cargo_wagon)
+      if inv.is_empty() then
+        for i = 1, #inv do inv.set_filter(i, { name = "fd-mail", quality = "normal" }) end
+        table.insert(out, "pax_in_mail_wagon=" .. inv.insert({ name = "fd-passengers", count = 100 }))
+        table.insert(out, "mail_in_mail_wagon=" .. inv.insert({ name = "fd-mail", count = 100 }))
+        inv.clear()
+        for i = 1, #inv do inv.set_filter(i, nil) end
+        break
+      end
+    end
+    log("FDFILTER " .. table.concat(out, " "))
+  end
   storage.start = game.tick
   snap("load")
 end)
@@ -244,6 +262,7 @@ script.on_nth_tick(307, function()
   storage.sig_dbg = true
   local surf = game.surfaces["freight"]
   local s = surf.find_entities_filtered({ position = { -900.5, 77.5 }, radius = 0.5, type = "rail-signal" })[1]
+  if not s then return end
   log("FDSIGDBG signal pos=" .. serpent.line(s.position) .. " dir=" .. s.direction .. " layer=" .. tostring(s.rail_layer))
   for _, r in pairs(s.get_connected_rails()) do
     for _, d in pairs({ defines.rail_direction.front, defines.rail_direction.back }) do
