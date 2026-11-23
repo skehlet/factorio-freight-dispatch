@@ -1729,17 +1729,44 @@ local function apply_running_speed()
   force().character_running_speed_modifier = upgrade_tier("running").speed
 end
 
--- Wagon capacity upgrade: every cargo wagon's inventory is resized (never shrunk).
+-- Wagon capacity upgrade: every cargo wagon's inventory is resized to the current tier. Since
+-- 0.8.5 (two tiers removed) a bigger wagon also shrinks back, but only once its cargo fits in the
+-- smaller size, so nothing is ever deleted; until then it is retried every 5 s.
 local function apply_wagon_capacity()
   local slots = upgrade_tier("wagons").slots
   for _, train in pairs(all_trains()) do
     if train.valid then
       for _, w in pairs(train.cargo_wagons) do
+        local inv = w.get_inventory(defines.inventory.cargo_wagon)
         local cur = w.get_inventory_size_override(defines.inventory.cargo_wagon)
-        if (cur or 0) < slots and #w.get_inventory(defines.inventory.cargo_wagon) < slots then
+        if (cur or 0) < slots and #inv < slots then
           w.set_inventory_size_override(defines.inventory.cargo_wagon, slots)
+        elseif #inv > slots and #inv - inv.count_empty_stacks() <= slots then
+          inv.sort_and_merge() -- filled stacks first, so the slots that go are empty
+          local tail_empty = true
+          for i = slots + 1, #inv do
+            if inv[i].valid_for_read then tail_empty = false break end
+          end
+          if tail_empty then w.set_inventory_size_override(defines.inventory.cargo_wagon, slots) end
         end
       end
+    end
+  end
+end
+
+-- 0.8.5: a save above the last tier of a line (the removed wagon tiers) drops to the top tier
+-- and gets the removed tiers' prices back.
+local function clamp_upgrades()
+  storage.upgrades = storage.upgrades or {}
+  for _, u in pairs(C.UPGRADES) do
+    local lv = storage.upgrades[u.id]
+    if lv and lv > #u.tiers then
+      local refund = 0
+      if u.id == "wagons" then refund = ({ 0, 0, 0, 0, 25000000, 75000000 })[math.min(lv, 6)] end
+      storage.upgrades[u.id] = #u.tiers
+      storage.money = storage.money + refund
+      game.print(string.format("Freight Dispatch: the bigger wagon upgrades were removed. Wagons go back to %s (%d slots) as they empty, and you got $%s back.",
+        u.tiers[#u.tiers].name, u.tiers[#u.tiers].slots, M.fmt(refund)))
     end
   end
 end
@@ -2275,6 +2302,7 @@ script.on_configuration_changed(function()
   if storage.disabled then return end
   init_storage()
   unlock_techs()
+  clamp_upgrades()
   if game.surfaces[C.SURFACE] then
     relayout_towns()
     -- paint any train still in default red (all trains in saves from before 0.3.5)

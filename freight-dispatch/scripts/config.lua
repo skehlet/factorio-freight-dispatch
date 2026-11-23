@@ -84,7 +84,7 @@ C.SHOP = {
 }
 
 -- Upgrades (Shop). Tier 1 is what you start with. Each applies to every train at once.
--- 0.8.2 (Steve): two more tiers per line, each with `rockets = 1`: buyable only once the first
+-- 0.8.2 (Steve): two more tiers per line (wagons: removed again in 0.8.5), each with `rockets = 1`: buyable only once the first
 -- rocket has launched. Priced as an end game cash sink (about $230M for all eight, against
 -- about $3M/min income at that stage).
 C.UPGRADES = {
@@ -101,8 +101,8 @@ C.UPGRADES = {
     { name = "Extended wagons", slots = 60, price = 3000000, desc = "3,000 units per wagon" },
     { name = "Double-deck wagons", slots = 80, price = 12000000, desc = "4,000 units per wagon" },
     { name = "Jumbo wagons", slots = 120, price = 15000000, desc = "6,000 units per wagon" },
-    { name = "Articulated wagons", slots = 160, price = 25000000, rockets = 1, desc = "8,000 units per wagon" },
-    { name = "Superfreighter wagons", slots = 200, price = 50000000, rockets = 1, desc = "10,000 units per wagon" },
+    -- 0.8.5: Articulated (160 slots, $25M) and Superfreighter (200, $50M) removed (Steve: wagons too
+    -- big). on_configuration_changed refunds them and wagons shrink back once their cargo fits.
   } },
   { id = "loading", label = "Station crews", icon = "item/fd-passengers", tiers = {
     { name = "Small crews", rate = 400, desc = "Loads 400 per wagon per second" },
