@@ -65,6 +65,7 @@ Rail signal: one train per block, place it where trains should wait. Chain signa
 - A disabled stop is skipped. To hold a train instead, close a rail signal before the stop.
 - Full loads only: enable a town's stop while [item=fd-passengers] Passengers > 4000.
 [item=fd-decider] Decider combinator (Shop, no power) combines conditions: box -> decider input, decider output -> stop. Output [virtual-signal=signal-red] = 1 when it should stop, and enable the stop while [virtual-signal=signal-red] = 0. For example, steel mill ore stop: [item=fd-iron-ore] Iron ore > 15000 OR [item=fd-coal] Coal < 1000.
+[item=fd-arithmetic] Arithmetic combinator (Shop, no power) does maths on signals. Stop priority only goes from 0 to 255 (higher wins, then the nearest), so to send trains to the busiest town, output [item=fd-passengers] Passengers / 20 as [virtual-signal=signal-W], wire it to every same-named stop and tick "Set priority" with [virtual-signal=signal-W].
 ]]
 
 local function hud(player)

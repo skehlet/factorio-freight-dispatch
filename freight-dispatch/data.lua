@@ -277,6 +277,27 @@ do
   })
 end
 
+-- Arithmetic combinator that needs no power (Shop, 0.8.3). Steve wanted stop priority to follow
+-- waiting passengers, but priority only goes to 255, so the count has to be divided down first.
+do
+  local ac = table.deepcopy(data.raw["arithmetic-combinator"]["arithmetic-combinator"])
+  local icons = { { icon = "__base__/graphics/icons/arithmetic-combinator.png", icon_size = 64, tint = { 1, 0.85, 0.45, 1 } } }
+  ac.name = "fd-arithmetic"
+  ac.icon = nil
+  ac.icons = icons
+  ac.minable = { mining_time = 0.1, result = "fd-arithmetic" }
+  ac.energy_source = { type = "void" }
+  ac.fast_replaceable_group = nil
+  ac.next_upgrade = nil
+  data:extend({
+    ac,
+    { type = "item", name = "fd-arithmetic", icons = icons, subgroup = "fd-cargo", order = "y3", place_result = "fd-arithmetic", stack_size = 50 },
+    { type = "recipe", name = "fd-arithmetic", enabled = false,
+      ingredients = { { type = "item", name = "electronic-circuit", amount = 5 } },
+      results = { { type = "item", name = "fd-arithmetic", amount = 1 } } },
+  })
+end
+
 -- Map memory (0.7.6): an invisible radar that needs no power and keeps the chunks around it
 -- live on the map (no fog of war). The script places one per block of charted land, so
 -- anything you've seen once stays visible. It scans nothing farther out, so it never

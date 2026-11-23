@@ -158,6 +158,38 @@ local function circuit_check(tick)
     end
     L("decider placed", tostring(d ~= nil))
   end
+  -- powerless arithmetic (0.8.3): box -> input (red), Passengers / 20 -> W on its green output,
+  -- wired to stop A, which takes its priority from W. At 1800 switch to Passengers * 1 to see
+  -- whether priority is capped at 255.
+  if tick == 1200 then
+    local surf = box.surface
+    local ap = surf.find_non_colliding_position("fd-arithmetic", { box.position.x - 3, box.position.y + 2 }, 8, 0.5)
+    local a = ap and surf.create_entity({ name = "fd-arithmetic", position = ap, force = "player", raise_built = true })
+    if a then
+      box.get_wire_connector(defines.wire_connector_id.circuit_red, true).connect_to(
+        a.get_wire_connector(defines.wire_connector_id.combinator_input_red, true))
+      a.get_wire_connector(defines.wire_connector_id.combinator_output_green, true).connect_to(
+        sa.get_wire_connector(defines.wire_connector_id.circuit_green, true))
+      a.get_control_behavior().parameters = { first_signal = { type = "item", name = "fd-passengers" },
+        operation = "/", second_constant = 20, output_signal = { type = "virtual", name = "signal-W" } }
+      scb.set_priority = true
+      scb.priority_signal = { type = "virtual", name = "signal-W" }
+      storage.arith = a
+    end
+    L("arithmetic placed", tostring(a ~= nil))
+  end
+  local ar = storage.arith
+  if ar and ar.valid then
+    local net = ar.get_circuit_network(defines.wire_connector_id.combinator_output_green)
+    local w = 0
+    for _, sg in pairs(net and net.signals or {}) do if sg.signal.name == "signal-W" then w = sg.count end end
+    L("arith W=" .. w .. " op=" .. ar.get_control_behavior().parameters.operation .. " stop priority=" .. sa.train_stop_priority)
+    if tick == 1800 then
+      local pr = ar.get_control_behavior().parameters
+      pr.operation = "*"; pr.second_constant = 1
+      ar.get_control_behavior().parameters = pr
+    end
+  end
   local d = storage.decider
   if d and d.valid then
     local net = d.get_circuit_network(defines.wire_connector_id.combinator_output_green)
