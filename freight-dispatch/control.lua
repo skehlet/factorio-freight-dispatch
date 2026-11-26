@@ -234,7 +234,7 @@ local function upgrade_def(id)
   end
 end
 
--- current tier table of an upgrade ("fuel", "wagons", "loading")
+-- current tier table of an upgrade ("fuel", "wagons", "loading", "running")
 local function upgrade_tier(id)
   local u = upgrade_def(id)
   local level = (storage.upgrades and storage.upgrades[id]) or 1
@@ -1754,21 +1754,29 @@ local function apply_wagon_capacity()
   end
 end
 
--- 0.8.5: a save above the last tier of a line (the removed wagon tiers) drops to the top tier
--- and gets the removed tiers' prices back.
+-- 0.8.5 / 0.8.6: a save above the last tier of a line (the removed rocket-gated tiers of wagons,
+-- station crews and running shoes) drops to the top tier and gets the removed tiers' prices back.
+local REMOVED_TIER_PRICES = {
+  wagons = { 25000000, 50000000 },  -- Articulated, Superfreighter (0.8.5)
+  loading = { 15000000, 30000000 }, -- Robotic loaders, Gravity chutes (0.8.6)
+  running = { 8000000, 16000000 },  -- Jet boots, Warp boots (0.8.6)
+}
 local function clamp_upgrades()
   storage.upgrades = storage.upgrades or {}
   for _, u in pairs(C.UPGRADES) do
     local lv = storage.upgrades[u.id]
     if lv and lv > #u.tiers then
       local refund = 0
-      if u.id == "wagons" then refund = ({ 0, 0, 0, 0, 25000000, 75000000 })[math.min(lv, 6)] end
+      for i, price in ipairs(REMOVED_TIER_PRICES[u.id] or {}) do
+        if lv >= #u.tiers + i then refund = refund + price end
+      end
       storage.upgrades[u.id] = #u.tiers
       storage.money = storage.money + refund
-      game.print(string.format("Freight Dispatch: the bigger wagon upgrades were removed. Wagons go back to %s (%d slots) as they empty, and you got $%s back.",
-        u.tiers[#u.tiers].name, u.tiers[#u.tiers].slots, M.fmt(refund)))
+      game.print(string.format("Freight Dispatch: the top %s upgrades were removed. You're back on %s and got $%s back.",
+        u.label, u.tiers[#u.tiers].name, M.fmt(refund)))
     end
   end
+  apply_running_speed()
 end
 
 function M.buy_upgrade(player, id)

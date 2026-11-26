@@ -84,9 +84,10 @@ C.SHOP = {
 }
 
 -- Upgrades (Shop). Tier 1 is what you start with. Each applies to every train at once.
--- 0.8.2 (Steve): two more tiers per line (wagons: removed again in 0.8.5), each with `rockets = 1`: buyable only once the first
--- rocket has launched. Priced as an end game cash sink (about $230M for all eight, against
--- about $3M/min income at that stage).
+-- 0.8.2 (Steve): two more tiers per line, each with `rockets = 1`: buyable only once the first
+-- rocket has launched. Only fuel keeps them: wagons lost theirs in 0.8.5, station crews and
+-- running shoes in 0.8.6 (Steve: too much). Fuel's two cost $90M, against about $3M/min income
+-- at that stage.
 C.UPGRADES = {
   { id = "fuel", label = "Locomotive fuel", icon = "item/rocket-fuel", tiers = {
     { name = "Solid fuel", item = "solid-fuel", desc = "Acceleration x1.2, top speed x1.05" },
@@ -109,16 +110,14 @@ C.UPGRADES = {
     { name = "Full crews", rate = 600, price = 1000000, desc = "Loads 600 per wagon per second" },
     { name = "Double shifts", rate = 900, price = 5000000, desc = "Loads 900 per wagon per second" },
     { name = "Automated platforms", rate = 1400, price = 8000000, desc = "Loads 1,400 per wagon per second" },
-    { name = "Robotic loaders", rate = 2000, price = 15000000, rockets = 1, desc = "Loads 2,000 per wagon per second" },
-    { name = "Gravity chutes", rate = 3000, price = 30000000, rockets = 1, desc = "Loads 3,000 per wagon per second" },
+    -- 0.8.6: Robotic loaders (2,000/s, $15M) and Gravity chutes (3,000/s, $30M) removed (Steve: too much).
   } },
   { id = "running", label = "Running shoes", icon = "item/exoskeleton-equipment", tiers = {
     { name = "Work boots", speed = 0, desc = "Normal running speed" },
     { name = "Trail runners", speed = 0.5, price = 500000, desc = "Run 50% faster" },
     { name = "Racing spikes", speed = 1, price = 3000000, desc = "Run twice as fast" },
     { name = "Rocket boots", speed = 2, price = 4000000, desc = "Run three times as fast" },
-    { name = "Jet boots", speed = 3, price = 8000000, rockets = 1, desc = "Run four times as fast" },
-    { name = "Warp boots", speed = 5, price = 16000000, rockets = 1, desc = "Run six times as fast" },
+    -- 0.8.6: Jet boots (+3, $8M) and Warp boots (+5, $16M) removed (Steve: too much).
   } },
 }
 

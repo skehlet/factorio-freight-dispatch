@@ -15,7 +15,7 @@ You run a railway. Towns and industries sit inside coloured rings across the map
   Two-way passenger lines and loops: "Full cargo OR 30 seconds" at every town.
 [font=default-bold]3. Get paid.[/font] Amount x straight-line distance x cargo rate. Cargo must travel 60+ tiles, and slow trips pay less (passengers and mail lose value fastest).
 [font=default-bold]4. Grow.[/font] Industries level up as you ship from them. Towns grow only from goods. More output means more trains, so signalling matters.
-[font=default-bold]5. Upgrade.[/font] The Shop sells fuel, bigger wagons, faster station crews and running shoes. Each applies to every train. Fuel, station crews and running shoes each have two more tiers that unlock after your first rocket launch.
+[font=default-bold]5. Upgrade.[/font] The Shop sells fuel, bigger wagons, faster station crews and running shoes. Each applies to every train. Fuel has two more tiers that unlock after your first rocket launch.
 
 Whenever fewer than 6 sites are unserved, a new one is founded 280-700 tiles from your network and announced in chat. New sites fill the supply chain from the bottom up: first a coal mine and lumber camp you haven't connected yet, then an iron mine and power plant, then a town, then a steel mill, then a factory. A missing coal mine, lumber camp, iron mine, power plant or town is founded even when 6 sites are already waiting. Contracts only name places you already serve.
 
