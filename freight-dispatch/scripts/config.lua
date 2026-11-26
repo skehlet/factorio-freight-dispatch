@@ -133,6 +133,38 @@ C.CARGO = {
   ["fd-goods"]      = { rate = 3.5, decay = 400, label = "Goods" },
 }
 
+-- 0.9.0 destinations (Steve): passengers and mail have a destination. Each town (up to
+-- DEST_TOWNS) and Spaceport (up to DEST_PADS, numbers after the towns) gets a number N, and
+-- cargo bound there is its own item, fd-passengers-N / fd-mail-N, with a coloured icon. A town's
+-- waiting passengers and mail have no destination yet: it is picked as they board, among the
+-- numbered sites the train can take them to (its schedule and interrupt targets, reachable by
+-- rail), weighted by town population. They get off only at their destination.
+C.DEST_TOWNS = 16
+C.DEST_PADS = 4
+C.DESTS = C.DEST_TOWNS + C.DEST_PADS
+C.DEST_BASES = { "fd-passengers", "fd-mail" }
+C.DEST_COLORS = { -- disc colours, 0-255
+  { 230, 40, 40 }, { 245, 140, 20 }, { 240, 210, 30 }, { 150, 220, 40 }, { 30, 160, 60 },
+  { 20, 180, 160 }, { 40, 200, 240 }, { 60, 120, 240 }, { 40, 50, 170 }, { 140, 60, 220 },
+  { 220, 60, 200 }, { 250, 130, 180 }, { 140, 90, 40 }, { 130, 140, 40 }, { 150, 150, 150 },
+  { 120, 40, 50 },
+  -- Spaceports
+  { 245, 245, 245 }, { 170, 200, 230 }, { 255, 200, 60 }, { 80, 80, 90 },
+}
+C.BASE = {}    -- destination item -> its base cargo (fd-passengers-3 -> fd-passengers)
+C.DEST_NO = {} -- destination item -> destination number
+function C.variant(base, n) return base .. "-" .. n end
+function C.base(item) return C.BASE[item] or item end
+for n = 1, C.DESTS do
+  for _, b in pairs(C.DEST_BASES) do
+    local v = C.variant(b, n)
+    C.BASE[v] = b
+    C.DEST_NO[v] = n
+    local cb = C.CARGO[b]
+    C.CARGO[v] = { rate = cb.rate, decay = cb.decay, label = cb.label, base = b }
+  end
+end
+
 -- Towns grow ONLY from goods (0.3.0). Passengers and mail are steady income, not growth.
 -- 0.6.0 rebalance (Steve, after a 10.9 h game where goods made 56% of income and towns hit
 -- 5,500 pop with 60-90k passengers waiting): goods 5.0 -> 3.5, passengers 1.5 -> 3.0 but made

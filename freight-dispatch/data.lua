@@ -45,6 +45,44 @@ for _, c in pairs(cargo) do
   })
 end
 
+-- 0.9.0: passengers and mail bound for destination N (a town, or after the towns a Spaceport).
+-- A coloured disc (graphics/dest/disc.png tinted per destination), the cargo picture and the
+-- number. Each kind gets its own row in the item picker.
+local C = require("scripts.config")
+data:extend({
+  { type = "item-subgroup", name = "fd-dest-passengers", group = "freight-dispatch", order = "b" },
+  { type = "item-subgroup", name = "fd-dest-mail", group = "freight-dispatch", order = "c" },
+})
+local dest_pictures = {
+  ["fd-passengers"] = { icon = "__core__/graphics/icons/entity/character.png", scale = 0.36, shift = { -2, -3 } },
+  ["fd-mail"] = { icon = "__freight-dispatch__/graphics/mail.png", scale = 0.32, shift = { -2, -4 } },
+}
+for n = 1, C.DESTS do
+  local col = C.DEST_COLORS[n]
+  local pad = n > C.DEST_TOWNS
+  for _, b in pairs(C.DEST_BASES) do
+    local pic = dest_pictures[b]
+    local short = b == "fd-passengers" and "passengers" or "mail"
+    data:extend({
+      {
+        type = "item",
+        name = C.variant(b, n),
+        localised_name = { "item-name.fd-" .. short .. (pad and "-pad" or "-dest"), tostring(pad and (n - C.DEST_TOWNS) or n) },
+        localised_description = { "item-description.fd-dest" },
+        icons = {
+          { icon = "__freight-dispatch__/graphics/dest/disc.png", icon_size = 64, tint = { col[1] / 255, col[2] / 255, col[3] / 255, 1 } },
+          { icon = pic.icon, icon_size = 64, scale = pic.scale, shift = pic.shift },
+          { icon = "__freight-dispatch__/graphics/dest/num-" .. n .. ".png", icon_size = 64 },
+        },
+        subgroup = "fd-dest-" .. short,
+        order = string.format("%02d", n),
+        stack_size = 50,
+        flags = { "always-show" },
+      },
+    })
+  end
+end
+
 -- Top fuel upgrade tier (Shop > Upgrades). Never craftable: there is no recipe.
 data:extend({
   {

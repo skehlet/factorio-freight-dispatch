@@ -7,6 +7,7 @@
 local Y = 1000
 
 local function L(...) log("FDTEST " .. table.concat({ ... }, " ")) end
+local dest_check
 
 local function build()
   local surf = game.surfaces["freight"]
@@ -212,6 +213,72 @@ local function circuit_check(tick)
   end
 end
 
+-- 0.9.0 destinations: numbers, stop names, where the shuttle can take passengers, a wildcard
+-- interrupt (added and removed in the same tick), an unreachable wildcard-only train, wagon
+-- filters (one slot of wagon 2 filtered to mail), and stranded riders.
+local function wagon_summary(w)
+  local inv = w.get_inventory(defines.inventory.cargo_wagon)
+  local nf = 0
+  for i = 1, #inv do if inv.get_filter(i) then nf = nf + 1 end end
+  local c = {}
+  for _, it in pairs(inv.get_contents()) do c[#c + 1] = it.name .. "=" .. it.count end
+  table.sort(c)
+  return "slots=" .. #inv .. " filtered=" .. nf .. " " .. table.concat(c, ",")
+end
+
+dest_check = function(tick)
+  local t = storage.train
+  if not (t and t.valid) then return end
+  if tick == 1200 then
+    L("dest_sites=" .. serpent.line(remote.call("freight_dispatch", "dest_sites")))
+    L("stops=" .. serpent.line((function()
+      local n = {}
+      for _, s in pairs(game.surfaces["freight"].find_entities_filtered({ type = "train-stop" })) do n[#n + 1] = s.backer_name end
+      return n
+    end)()))
+    L("shuttle dests=" .. serpent.line(remote.call("freight_dispatch", "train_dests", t)))
+    -- wildcard interrupt on the shuttle, read back, dests, then removed again
+    local sch = t.get_schedule()
+    local ok, err = pcall(function()
+      sch.add_interrupt({ name = "fd-test dispatch",
+        conditions = { { type = "item_count", condition = { first_signal = { type = "virtual", name = "signal-item-parameter" }, comparator = ">", constant = 0 } } },
+        targets = { { station = "[virtual-signal=signal-item-parameter] stop", wait_conditions = { { type = "time", ticks = 60 } } } } })
+    end)
+    L("interrupt add ok=" .. tostring(ok) .. " " .. tostring(err))
+    L("interrupts=" .. serpent.line(sch.get_interrupts()))
+    L("shuttle+wildcard dests=" .. serpent.line(remote.call("freight_dispatch", "train_dests", t)))
+    pcall(function() sch.remove_interrupt(sch.interrupt_count) end)
+    L("interrupt count after remove=" .. tostring(sch.interrupt_count))
+    -- a lone locomotive on its own short track, wildcard interrupt only: nothing reachable
+    local surf = game.surfaces["freight"]
+    for x = 100, 140, 2 do surf.create_entity({ name = "straight-rail", position = { x, Y + 30 }, direction = defines.direction.east, force = "player" }) end
+    local lone = surf.create_entity({ name = "locomotive", position = { 120, Y + 30 }, direction = defines.direction.east, force = "player" })
+    if lone then
+      local ls = lone.train.get_schedule()
+      pcall(function()
+        ls.add_interrupt({ name = "fd-test lone",
+          conditions = { { type = "item_count", condition = { first_signal = { type = "virtual", name = "signal-item-parameter" }, comparator = ">", constant = 0 } } },
+          targets = { { station = "[virtual-signal=signal-item-parameter] stop", wait_conditions = { { type = "time", ticks = 60 } } } } })
+      end)
+      L("lone wildcard dests=" .. serpent.line(remote.call("freight_dispatch", "train_dests", lone.train)))
+    end
+    -- wagon 2: filter one slot to mail; the mod extends it to the whole wagon
+    local inv2 = t.cargo_wagons[2].get_inventory(defines.inventory.cargo_wagon)
+    for i = 1, #inv2 do
+      if not inv2[i].valid_for_read then L("filter set=" .. tostring(inv2.set_filter(i, "fd-mail")) .. " slot " .. i) break end
+    end
+  end
+  if tick == 4800 then
+    -- mail for starter town 1, which the shuttle never visits, into the mail-filtered wagon 2: it
+    -- should get off at the next town (town A or B stock) with a flying text
+    L("stranded injected=" .. remote.call("freight_dispatch", "inject_cargo", t.cargo_wagons[2], "fd-mail-1", 300, storage.town_a))
+  end
+  if tick >= 1200 and tick <= 9000 and tick % 1200 == 0 or tick == 4800 + 600 or tick == 4800 + 1200 then
+    L("w1 " .. wagon_summary(t.cargo_wagons[1]))
+    L("w2 " .. wagon_summary(t.cargo_wagons[2]))
+  end
+end
+
 -- top speed tracking (tiles/tick), to verify the fuel upgrade
 script.on_event(defines.events.on_tick, function()
   local t = storage.train
@@ -259,6 +326,7 @@ script.on_nth_tick(600, function(e)
     return
   end
   if e.tick >= 1200 and e.tick <= 3000 then circuit_check(e.tick) end
+  dest_check(e.tick)
   -- power plant (0.4.1): a plant overlapping stop B with a nearly full fuel pile; coal and
   -- lumber in the train. Only what fits comes off; the rest follows as the plant burns.
   if e.tick == 3600 then

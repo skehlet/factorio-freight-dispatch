@@ -497,8 +497,9 @@ end
 
 local function site_title(site)
   local kind = C.KINDS[site.kind]
-  if site.kind == "town" then return site.name end
-  return site.name .. " " .. kind.label
+  local t = site.kind == "town" and site.name or (site.name .. " " .. kind.label)
+  if site.no then t = t .. " [item=" .. C.variant("fd-passengers", site.no) .. "]" end
+  return t
 end
 M.site_title = site_title
 
@@ -782,6 +783,17 @@ local function tag_site(site)
   if ok and tag then site.tagged = true end
 end
 
+-- 0.9.0: the first free destination number for a town (1..DEST_TOWNS) or Spaceport (after them)
+function M.free_dest_no(kind)
+  storage.dest_sites = storage.dest_sites or {}
+  local a, b = 1, C.DEST_TOWNS
+  if kind == "spaceport" then a, b = C.DEST_TOWNS + 1, C.DESTS end
+  for n = a, b do
+    if not storage.dest_sites[n] then return n end
+  end
+  return nil
+end
+
 local function create_site(kind, x, y, opts)
   opts = opts or {}
   local surf = surface()
@@ -800,6 +812,14 @@ local function create_site(kind, x, y, opts)
   if kind == "town" then
     local d = dist(x, y, 0, 0)
     site.pop = opts.pop or math.floor(250 + rand() * 350 + d * 0.4)
+  end
+  if kind == "town" or kind == "spaceport" then
+    -- 0.9.0: destination number (passengers and mail bound here are fd-passengers-N, fd-mail-N)
+    local n = M.free_dest_no(kind)
+    if n then
+      site.no = n
+      storage.dest_sites[n] = id
+    end
   end
   storage.sites[id] = site
   storage.stop_links = {}
@@ -888,7 +908,7 @@ local function urgent_kind(served)
   for _, tier in ipairs(C.FOUND_TIERS) do
     local gaps = {}
     for _, kind in ipairs(tier.kinds) do
-      if not spare[kind] then table.insert(gaps, kind) end
+      if not spare[kind] and (kind ~= "town" or M.free_dest_no("town")) then table.insert(gaps, kind) end
     end
     if #gaps > 0 then return pick(gaps), tier.basic or false end
   end
@@ -916,6 +936,7 @@ local function pick_found_kind(served)
       local n = spare[kind] or 0
       w = C.KIND_WEIGHTS[kind] / ((1 + n) * (1 + n))
     end
+    if kind == "town" and not M.free_dest_no("town") then w = 0 end -- 0.9.0: all 16 numbers used
     weights[kind] = w
     total = total + w
   end
@@ -924,7 +945,7 @@ local function pick_found_kind(served)
     r = r - weights[kind]
     if r <= 0 and weights[kind] > 0 then return kind end
   end
-  return "town"
+  return "coal-mine"
 end
 
 -- Found one new site on purpose: FOUND_MIN..FOUND_MAX tiles from a random served site (or
@@ -942,6 +963,7 @@ local function found_site(force_kind)
   if #anchors == 0 then anchors = { { x = 0, y = 0 } } end
   -- a supply-chain gap wins over a kind picked earlier that couldn't be placed yet
   local kind = force_kind or urgent_kind(served) or storage.found_kind or pick_found_kind(served)
+  if kind == "town" and not M.free_dest_no("town") then kind = pick_found_kind(served) end
   if not force_kind then storage.found_kind = kind end
   -- a power plant goes where it would cover the most sites no plant covers yet (fuelled or
   -- not; your served ones count double), so there's usually a good one to connect. Anything
@@ -1146,10 +1168,31 @@ local function on_stop_built(stop, player)
     return
   end
   local names = {}
+  local dest
   for i, s in pairs(sites) do
     if i <= 2 then table.insert(names, site_title(s)) end
+    if s.no and not dest then dest = s end
   end
-  stop.backer_name = table.concat(names, " & ")
+  if dest then
+    -- 0.9.0 (Steve): a town's or Spaceport's stop is named after its destination items, so one
+    -- wildcard interrupt ("[item wildcard] stop") can send any train where its cargo is bound.
+    -- Once it has a passenger stop, the next one is named for mail (if it has none), the rest
+    -- for passengers again.
+    local function has(b)
+      for _, st in pairs(game.train_manager.get_train_stops({ station_name = "[item=" .. C.variant(b, dest.no) .. "] stop", surface = C.SURFACE })) do
+        if st ~= stop then
+          for _, s in pairs(linked_sites(st)) do
+            if s.id == dest.id then return true end
+          end
+        end
+      end
+      return false
+    end
+    local b = (has("fd-passengers") and not has("fd-mail")) and "fd-mail" or "fd-passengers"
+    stop.backer_name = "[item=" .. C.variant(b, dest.no) .. "] stop"
+  else
+    stop.backer_name = table.concat(names, " & ")
+  end
   flying_text(stop.position, "Serves: " .. table.concat(names, ", "), { 0.5, 1, 0.5 }, player)
 end
 
@@ -1263,14 +1306,207 @@ local function is_dropoff(train)
   return result
 end
 
+---------------------------------------------------------------------------
+-- Destinations (0.9.0) and wagon filters
+---------------------------------------------------------------------------
+
+local function filter_name(f)
+  if type(f) == "table" then return f.name end
+  return f
+end
+
+-- Insert into a cargo wagon. A slot filtered to passengers (or mail) takes passengers for any
+-- destination: an empty slot filtered to one destination is switched to the one loading now.
+local function wagon_insert(inv, item, n)
+  if n <= 0 then return 0 end
+  local got = inv.insert({ name = item, count = n })
+  local b = C.BASE[item]
+  if got >= n or not b or not inv.is_filtered() then return got end
+  local need = math.ceil((n - got) / prototypes.item[item].stack_size)
+  for i = 1, #inv do
+    if need <= 0 then break end
+    local f = filter_name(inv.get_filter(i))
+    if f and f ~= item and C.base(f) == b and not inv[i].valid_for_read then
+      if inv.set_filter(i, item) then need = need - 1 end
+    end
+  end
+  return got + inv.insert({ name = item, count = n - got })
+end
+
+-- 0.9.0 (Steve): a wagon whose filters are all one cargo gets that filter on every slot, so
+-- filtering one slot makes a passenger (or mail, or coal) wagon, and the new slots from a wagon
+-- upgrade follow. Filters for several destinations of one cargo extend as that cargo for any
+-- destination. A wagon filtered to two different cargos is left alone.
+local function extend_wagon_filters(inv)
+  if not inv.is_filtered() then return end
+  local names, nnames, base, mixed = {}, 0, nil, false
+  local open = false
+  for i = 1, #inv do
+    local f = filter_name(inv.get_filter(i))
+    if f then
+      if not names[f] then names[f] = true nnames = nnames + 1 end
+      local b = C.base(f)
+      if base and b ~= base then mixed = true end
+      base = base or b
+    else
+      open = true
+    end
+  end
+  if mixed or not base or not open then return end
+  local fill = nnames == 1 and next(names) or base
+  for i = 1, #inv do
+    if not inv.get_filter(i) then
+      local st = inv[i]
+      if not st.valid_for_read then
+        inv.set_filter(i, fill)
+      elseif C.base(st.name) == base then
+        inv.set_filter(i, st.name)
+      end
+    end
+  end
+end
+M.extend_wagon_filters = extend_wagon_filters
+
+local PARAM = "[virtual-signal=signal-item-parameter]"
+
+local function stops_named(name)
+  return game.train_manager.get_train_stops({ station_name = name, surface = C.SURFACE })
+end
+
+local function links_site(stop, site)
+  for _, s in pairs(linked_sites(stop)) do
+    if s.id == site.id then return true end
+  end
+  return false
+end
+
+-- Where this train can take passengers and mail: dests[base][site id] = site, for numbered
+-- sites (towns, Spaceports) with a stop on its schedule or among its interrupt targets, and,
+-- for a wildcard target like "[item wildcard] stop", every site whose cargo would name a stop
+-- there. Only stops the train can reach by rail count. Cached for 10 s.
+local function train_dests(train)
+  storage.dest_cache = storage.dest_cache or {}
+  local c = storage.dest_cache[train.id]
+  if c and game.tick - c.tick < 600 then return c.dests end
+  local names, patterns = {}, {}
+  local function add(station)
+    if not station or station == "" then return end
+    if station:find(PARAM, 1, true) then patterns[station] = true else names[station] = true end
+  end
+  pcall(function()
+    local sch = train.get_schedule()
+    for i = 1, sch.get_record_count() or 0 do
+      local r = sch.get_record({ schedule_index = i })
+      if r then add(r.station) end
+    end
+    for _, it in pairs(sch.get_interrupts() or {}) do
+      for _, r in pairs(it.targets or {}) do add(r.station) end
+    end
+  end)
+  local goals = {} -- { stop, site, base (nil = both) }
+  local seen = {}
+  local function goal(stop, site, b)
+    local key = stop.unit_number .. ":" .. site.id .. ":" .. (b or "")
+    if seen[key] or not stop.connected_rail then return end
+    seen[key] = true
+    table.insert(goals, { stop = stop, site = site, base = b })
+  end
+  for name in pairs(names) do
+    for _, st in pairs(stops_named(name)) do
+      for _, s in pairs(linked_sites(st)) do
+        if s.no then goal(st, s, nil) end
+      end
+    end
+  end
+  for pat in pairs(patterns) do
+    local i, j = pat:find(PARAM, 1, true)
+    for n, sid in pairs(storage.dest_sites or {}) do
+      local s = storage.sites[sid]
+      if s then
+        for _, b in pairs(C.DEST_BASES) do
+          for _, st in pairs(stops_named(pat:sub(1, i - 1) .. "[item=" .. C.variant(b, n) .. "]" .. pat:sub(j + 1))) do
+            if links_site(st, s) then goal(st, s, b) end
+          end
+        end
+      end
+    end
+  end
+  local res
+  if #goals > 0 then
+    local list = {}
+    for k, g in ipairs(goals) do list[k] = { train_stop = g.stop } end
+    pcall(function()
+      res = game.train_manager.request_train_path({ train = train, goals = list, type = "all-goals-accessible" })
+    end)
+  end
+  local dests = {}
+  for _, b in pairs(C.DEST_BASES) do dests[b] = {} end
+  for k, g in ipairs(goals) do
+    if not (res and res.accessible) or res.accessible[k] then
+      for _, b in pairs(C.DEST_BASES) do
+        if not g.base or g.base == b then dests[b][g.site.id] = g.site end
+      end
+    end
+  end
+  storage.dest_cache[train.id] = { tick = game.tick, dests = dests }
+  return dests
+end
+M.train_dests = train_dests
+
+-- Destinations for cargo `b` boarding at `here`, with weights: towns by population, a
+-- Spaceport strongly while its rocket still needs this cargo. Nothing within MIN_DIST.
+local function boarding_dests(dests, b, here)
+  local list, towns, tw = {}, 0, 0
+  for _, s in pairs(dests[b] or {}) do
+    if s.id ~= here.id and s.kind == "town" and dist(s.x, s.y, here.x, here.y) >= C.MIN_DIST then
+      local w = math.max(100, s.pop or 0)
+      table.insert(list, { site = s, w = w })
+      towns, tw = towns + 1, tw + w
+    end
+  end
+  for _, s in pairs(dests[b] or {}) do
+    if s.id ~= here.id and s.kind == "spaceport" and pad_room(s, b) > 0 and dist(s.x, s.y, here.x, here.y) >= C.MIN_DIST then
+      table.insert(list, { site = s, w = towns > 0 and 2 * tw / towns or 1000 })
+    end
+  end
+  table.sort(list, function(p, q) return p.site.id < q.site.id end) -- pairs order isn't stable
+  return list
+end
+
+-- Split `n` units between weighted destinations (whole units; the remainder goes to one
+-- destination picked at random by weight).
+local function split_by_weight(n, list)
+  local total = 0
+  for _, d in ipairs(list) do total = total + d.w end
+  local out, given = {}, 0
+  for k, d in ipairs(list) do
+    out[k] = math.floor(n * d.w / total)
+    given = given + out[k]
+  end
+  local left = n - given
+  if left > 0 then
+    local r = rand() * total
+    for k, d in ipairs(list) do
+      r = r - d.w
+      if r <= 0 or k == #list then out[k] = out[k] + left break end
+    end
+  end
+  return out
+end
+
 local function service_train(train)
   local stop = train.station
   if not (stop and stop.valid) then return end
   local sites = linked_sites(stop)
   if #sites == 0 then return end
   local dropoff = is_dropoff(train)
+  local dests
+  for _, site in pairs(sites) do
+    if site.kind == "town" or site.kind == "spaceport" then dests = train_dests(train) end
+  end
   local paid = 0
   local loaded = 0
+  local stranded = 0
   for _, wagon in pairs(train.cargo_wagons) do
     local inv = wagon.get_inventory(defines.inventory.cargo_wagon)
     if inv then
@@ -1279,10 +1515,12 @@ local function service_train(train)
       -- unload (instant, no rate limit): every lot that has travelled far enough comes off
       -- and is paid, as far as the site has room (mills and factories: input pile). Lots still
       -- near their origin stay aboard. Untracked cargo (more in the wagon than we have records
-      -- for) gets off for free.
+      -- for) gets off for free. 0.9.0: passengers and mail get off only at their destination.
       for _, site in pairs(sites) do
-        for _, item in pairs(C.KINDS[site.kind].accepts) do
-          local have = inv.get_item_count(item)
+        for _, base in pairs(C.KINDS[site.kind].accepts) do
+          local item = base
+          if C.TOWN_CARGO[base] then item = site.no and C.variant(base, site.no) or nil end
+          local have = item and inv.get_item_count(item) or 0
           if have > 0 then
             local lots = get_lots(rec, item) or {}
             local tracked = 0
@@ -1296,22 +1534,22 @@ local function service_train(train)
             -- Power plants (0.4.1) take what fits in their fuel pile. Towns take everything.
             local room = math.huge
             if C.KINDS[site.kind].secondary then
-              room = math.max(0, math.floor(C.INPUT_CAP - (site.input[item] or 0)))
+              room = math.max(0, math.floor(C.INPUT_CAP - (site.input[base] or 0)))
             elseif site.kind == "power-plant" then
-              room = math.max(0, math.floor((C.POWER.cap - (site.fuel or 0)) / C.POWER.fuel[item] + 0.001))
+              room = math.max(0, math.floor((C.POWER.cap - (site.fuel or 0)) / C.POWER.fuel[base] + 0.001))
             elseif site.kind == "spaceport" then
-              room = pad_room(site, item) -- only what the rocket being built still needs
+              room = pad_room(site, base) -- only what the rocket being built still needs
             end
             for _, lot in ipairs(lots) do
               if dist(lot.ox, lot.oy, site.x, site.y) >= C.MIN_DIST and avail > 0 and room > 0 then
                 local take = math.min(math.floor(lot.amount + 0.001), avail, room)
                 room = room - take
                 if take > 0 then
-                  local pay = payment(lot, site, item, take)
+                  local pay = payment(lot, site, base, take)
                   paid = paid + pay
                   -- lifetime earnings per cargo (balance checks; `stats` remote)
                   storage.earned_item = storage.earned_item or {}
-                  storage.earned_item[item] = (storage.earned_item[item] or 0) + pay
+                  storage.earned_item[base] = (storage.earned_item[base] or 0) + pay
                   deliver = deliver + take
                   avail = avail - take
                   lot.amount = lot.amount - take
@@ -1323,7 +1561,7 @@ local function service_train(train)
             local n = deliver + untracked
             if n > 0 then
               inv.remove({ name = item, count = n })
-              if deliver > 0 then on_delivered(site, item, deliver) end
+              if deliver > 0 then on_delivered(site, base, deliver) end
             end
             if inv.get_item_count(item) == 0 then
               rec[item] = nil
@@ -1333,38 +1571,67 @@ local function service_train(train)
           end
         end
       end
+      -- 0.9.0: passengers and mail whose destination this train no longer goes to (its
+      -- schedule changed, or the rail there is gone) get off at a town and wait there again
+      for _, site in pairs(sites) do
+        if site.kind == "town" and dests then
+          for item, _ in pairs(rec) do
+            local b, n = C.BASE[item], C.DEST_NO[item]
+            local sid = n and storage.dest_sites[n]
+            if b and sid ~= site.id and not dests[b][sid] then
+              local have = inv.get_item_count(item)
+              if have > 0 then
+                local back = inv.remove({ name = item, count = have })
+                site.stock[b] = (site.stock[b] or 0) + back
+                stranded = stranded + back
+              end
+              rec[item] = nil
+            end
+          end
+        end
+      end
       -- drop-off stop: cargo that never left home goes back to its site, and nothing loads
       if dropoff then
         for _, site in pairs(sites) do
-          for _, item in pairs(C.KINDS[site.kind].produces) do
-            local lots = get_lots(rec, item)
-            local have = inv.get_item_count(item)
-            if lots and have > 0 then
-              local keep, back = {}, 0
-              for _, lot in ipairs(lots) do
-                if have - back > 0 and dist(lot.ox, lot.oy, site.x, site.y) < C.MIN_DIST then
-                  local take = math.min(math.floor(lot.amount + 0.001), have - back)
-                  back = back + take
-                  lot.amount = lot.amount - take
+          for _, base in pairs(C.KINDS[site.kind].produces) do
+            for item, _ in pairs(rec) do
+              if C.base(item) == base then
+                local lots = get_lots(rec, item)
+                local have = inv.get_item_count(item)
+                if lots and have > 0 then
+                  local keep, back = {}, 0
+                  for _, lot in ipairs(lots) do
+                    if have - back > 0 and dist(lot.ox, lot.oy, site.x, site.y) < C.MIN_DIST then
+                      local take = math.min(math.floor(lot.amount + 0.001), have - back)
+                      back = back + take
+                      lot.amount = lot.amount - take
+                    end
+                    if lot.amount > 0.001 then table.insert(keep, lot) end
+                  end
+                  if back > 0 then
+                    inv.remove({ name = item, count = back })
+                    site.stock[base] = (site.stock[base] or 0) + back
+                  end
+                  if inv.get_item_count(item) == 0 then rec[item] = nil else rec[item] = keep end
                 end
-                if lot.amount > 0.001 then table.insert(keep, lot) end
               end
-              if back > 0 then
-                inv.remove({ name = item, count = back })
-                site.stock[item] = (site.stock[item] or 0) + back
-              end
-              if inv.get_item_count(item) == 0 then rec[item] = nil else rec[item] = keep end
             end
           end
         end
       end
       -- load: share this second's capacity evenly between every cargo type waiting here
-      -- (so plentiful passengers can't crowd out mail); leftover share goes to the others
+      -- (so plentiful passengers can't crowd out mail); leftover share goes to the others.
+      -- 0.9.0: passengers and mail pick a destination among the places this train goes.
       local offers = {}
       for _, site in pairs(dropoff and {} or sites) do
         for _, item in pairs(C.KINDS[site.kind].produces) do
           local s = math.floor(site.stock[item] or 0)
-          if s > 0 then table.insert(offers, { site = site, item = item, avail = s }) end
+          local to
+          if C.TOWN_CARGO[item] then
+            to = dests and boarding_dests(dests, item, site) or {}
+            if #to == 0 then s = 0 end
+          end
+          if s > 0 then table.insert(offers, { site = site, item = item, avail = s, to = to }) end
         end
       end
       for _ = 1, 4 do
@@ -1373,9 +1640,25 @@ local function service_train(train)
         local still = {}
         for _, o in ipairs(offers) do
           local want = math.min(o.avail, share, budget)
-          local ins = want > 0 and inv.insert({ name = o.item, count = want }) or 0
+          local site = o.site
+          local ins = 0
+          if want > 0 then
+            if o.to then
+              local parts = split_by_weight(want, o.to)
+              for k, d in ipairs(o.to) do
+                local v = C.variant(o.item, d.site.no)
+                local got = wagon_insert(inv, v, parts[k])
+                if got > 0 then
+                  add_loaded(wagon, v, got, site)
+                  ins = ins + got
+                end
+              end
+            else
+              ins = wagon_insert(inv, o.item, want)
+              if ins > 0 then add_loaded(wagon, o.item, ins, site) end
+            end
+          end
           if ins > 0 then
-            local site = o.site
             site.stock[o.item] = site.stock[o.item] - ins
             site.shipped = site.shipped + ins
             site.picked_min = site.picked_min + ins
@@ -1383,7 +1666,6 @@ local function service_train(train)
             budget = budget - ins
             loaded = loaded + ins
             o.avail = o.avail - ins
-            add_loaded(wagon, o.item, ins, site)
           end
           -- keep offering only if it took everything we asked for and more is waiting
           if ins == want and o.avail > 0 then table.insert(still, o) end
@@ -1391,6 +1673,9 @@ local function service_train(train)
         offers = still
       end
     end
+  end
+  if stranded > 0 then
+    flying_text(stop.position, fmt(stranded) .. " passengers and mail got off: this train no longer goes where they are bound", { 1, 0.7, 0.3 })
   end
   if paid > 0 then
     earn(paid)
@@ -1741,6 +2026,7 @@ local function apply_wagon_capacity()
         local cur = w.get_inventory_size_override(defines.inventory.cargo_wagon)
         if (cur or 0) < slots and #inv < slots then
           w.set_inventory_size_override(defines.inventory.cargo_wagon, slots)
+          inv = w.get_inventory(defines.inventory.cargo_wagon)
         elseif #inv > slots and #inv - inv.count_empty_stacks() <= slots then
           inv.sort_and_merge() -- filled stacks first, so the slots that go are empty
           local tail_empty = true
@@ -1749,6 +2035,7 @@ local function apply_wagon_capacity()
           end
           if tail_empty then w.set_inventory_size_override(defines.inventory.cargo_wagon, slots) end
         end
+        if inv and inv.valid then extend_wagon_filters(inv) end
       end
     end
   end
@@ -1797,6 +2084,7 @@ end
 -- nearest site that produces it, so it rejoins that site's waiting stock.
 local function return_cargo(item, count, x, y)
   local best, bd = nil, math.huge
+  item = C.base(item) -- 0.9.0: passengers and mail lose their destination
   for _, s in pairs(storage.sites) do
     for _, it in pairs(C.KINDS[s.kind].produces) do
       if it == item then
@@ -2242,6 +2530,7 @@ end
 local function init_storage()
   storage.sites = storage.sites or {}
   storage.next_site_id = storage.next_site_id or 1
+  storage.dest_sites = storage.dest_sites or {}
   storage.stop_links = storage.stop_links or {}
   storage.wagons = storage.wagons or {}
   storage.waiting = storage.waiting or {}
@@ -2509,6 +2798,9 @@ script.on_nth_tick(60, function(e)
   if e.tick % 300 == 0 then
     refuel_trains()
     apply_wagon_capacity()
+    for id, c in pairs(storage.dest_cache or {}) do
+      if e.tick - c.tick > 3600 then storage.dest_cache[id] = nil end
+    end
     for _, s in pairs(storage.sites) do update_site_render(s) end
   end
   if e.tick % C.INCOME_LOG_TICKS == 0 then
@@ -2838,8 +3130,22 @@ remote.add_interface("freight_dispatch", {
   end,
   set_stock = function(id, item, amount) storage.sites[id].stock[item] = amount end,
   -- test hook: put cargo in a wagon as if it had been loaded at site `origin_id`
+  -- 0.9.0 test hooks: where a train can take passengers and mail, and the destination numbers
+  train_dests = function(train)
+    storage.dest_cache = storage.dest_cache or {}
+    storage.dest_cache[train.id] = nil
+    local out = {}
+    for b, set in pairs(train_dests(train)) do
+      local ids = {}
+      for id in pairs(set) do table.insert(ids, id) end
+      table.sort(ids)
+      out[b] = ids
+    end
+    return out
+  end,
+  dest_sites = function() return storage.dest_sites end,
   inject_cargo = function(wagon, item, amount, origin_id)
-    local n = wagon.get_inventory(defines.inventory.cargo_wagon).insert({ name = item, count = amount })
+    local n = wagon_insert(wagon.get_inventory(defines.inventory.cargo_wagon), item, amount)
     if n > 0 then add_loaded(wagon, item, n, storage.sites[origin_id]) end
     return n
   end,
