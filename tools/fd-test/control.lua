@@ -242,7 +242,7 @@ dest_check = function(tick)
     local ok, err = pcall(function()
       sch.add_interrupt({ name = "fd-test dispatch",
         conditions = { { type = "item_count", condition = { first_signal = { type = "virtual", name = "signal-item-parameter" }, comparator = ">", constant = 0 } } },
-        targets = { { station = "[virtual-signal=signal-item-parameter] stop", wait_conditions = { { type = "time", ticks = 60 } } } } })
+        targets = { { station = "[virtual-signal=signal-item-parameter] unload", wait_conditions = { { type = "time", ticks = 60 } } } } })
     end)
     L("interrupt add ok=" .. tostring(ok) .. " " .. tostring(err))
     L("interrupts=" .. serpent.line(sch.get_interrupts()))
@@ -258,15 +258,18 @@ dest_check = function(tick)
       pcall(function()
         ls.add_interrupt({ name = "fd-test lone",
           conditions = { { type = "item_count", condition = { first_signal = { type = "virtual", name = "signal-item-parameter" }, comparator = ">", constant = 0 } } },
-          targets = { { station = "[virtual-signal=signal-item-parameter] stop", wait_conditions = { { type = "time", ticks = 60 } } } } })
+          targets = { { station = "[virtual-signal=signal-item-parameter] unload", wait_conditions = { { type = "time", ticks = 60 } } } } })
       end)
       L("lone wildcard dests=" .. serpent.line(remote.call("freight_dispatch", "train_dests", lone.train)))
     end
-    -- wagon 2: filter one slot to mail; the mod extends it to the whole wagon
+    -- wagon 2: every slot filtered to mail (0.9.1: the mod only extends filters on a wagon
+    -- upgrade, and only when all slots share one cargo; the upgrade at tick 6000 should give 120)
     local inv2 = t.cargo_wagons[2].get_inventory(defines.inventory.cargo_wagon)
+    local nset = 0
     for i = 1, #inv2 do
-      if not inv2[i].valid_for_read then L("filter set=" .. tostring(inv2.set_filter(i, "fd-mail")) .. " slot " .. i) break end
+      if not inv2[i].valid_for_read and inv2.set_filter(i, "fd-mail") then nset = nset + 1 end
     end
+    L("filter set on " .. nset .. " slots")
   end
   if tick == 4800 then
     -- mail for starter town 1, which the shuttle never visits, into the mail-filtered wagon 2: it

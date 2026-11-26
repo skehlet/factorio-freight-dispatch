@@ -1175,11 +1175,11 @@ local function on_stop_built(stop, player)
   end
   if dest then
     -- 0.9.0 (Steve): a town's or Spaceport's stop is named after its destination items, so one
-    -- wildcard interrupt ("[item wildcard] stop") can send any train where its cargo is bound.
+    -- wildcard interrupt ("[item wildcard] unload") can send any train where its cargo is bound.
     -- Once it has a passenger stop, the next one is named for mail (if it has none), the rest
     -- for passengers again.
     local function has(b)
-      for _, st in pairs(game.train_manager.get_train_stops({ station_name = "[item=" .. C.variant(b, dest.no) .. "] stop", surface = C.SURFACE })) do
+      for _, st in pairs(game.train_manager.get_train_stops({ station_name = "[item=" .. C.variant(b, dest.no) .. "] unload", surface = C.SURFACE })) do
         if st ~= stop then
           for _, s in pairs(linked_sites(st)) do
             if s.id == dest.id then return true end
@@ -1189,7 +1189,7 @@ local function on_stop_built(stop, player)
       return false
     end
     local b = (has("fd-passengers") and not has("fd-mail")) and "fd-mail" or "fd-passengers"
-    stop.backer_name = "[item=" .. C.variant(b, dest.no) .. "] stop"
+    stop.backer_name = "[item=" .. C.variant(b, dest.no) .. "] unload"
   else
     stop.backer_name = table.concat(names, " & ")
   end
@@ -1333,36 +1333,25 @@ local function wagon_insert(inv, item, n)
   return got + inv.insert({ name = item, count = n - got })
 end
 
--- 0.9.0 (Steve): a wagon whose filters are all one cargo gets that filter on every slot, so
--- filtering one slot makes a passenger (or mail, or coal) wagon, and the new slots from a wagon
--- upgrade follow. Filters for several destinations of one cargo extend as that cargo for any
--- destination. A wagon filtered to two different cargos is left alone.
-local function extend_wagon_filters(inv)
-  if not inv.is_filtered() then return end
-  local names, nnames, base, mixed = {}, 0, nil, false
-  local open = false
-  for i = 1, #inv do
+-- 0.9.1 (Steve): when a wagon upgrade adds slots (`old` = the size before), the new slots get
+-- the wagon's filter, but only if every old slot was filtered to one cargo. Slots switched to
+-- different destinations of one cargo by `wagon_insert` count as that cargo; the new slots then
+-- get the plain cargo (any destination), or the exact filter if all old slots share it.
+-- Filters are never changed otherwise.
+local function extend_wagon_filters(inv, old)
+  if old < 1 or #inv <= old or not inv.is_filtered() then return end
+  local names, nnames, base = {}, 0, nil
+  for i = 1, old do
     local f = filter_name(inv.get_filter(i))
-    if f then
-      if not names[f] then names[f] = true nnames = nnames + 1 end
-      local b = C.base(f)
-      if base and b ~= base then mixed = true end
-      base = base or b
-    else
-      open = true
-    end
+    if not f then return end
+    if not names[f] then names[f] = true nnames = nnames + 1 end
+    local b = C.base(f)
+    if base and b ~= base then return end
+    base = b
   end
-  if mixed or not base or not open then return end
   local fill = nnames == 1 and next(names) or base
-  for i = 1, #inv do
-    if not inv.get_filter(i) then
-      local st = inv[i]
-      if not st.valid_for_read then
-        inv.set_filter(i, fill)
-      elseif C.base(st.name) == base then
-        inv.set_filter(i, st.name)
-      end
-    end
+  for i = old + 1, #inv do
+    if not inv.get_filter(i) then inv.set_filter(i, fill) end
   end
 end
 M.extend_wagon_filters = extend_wagon_filters
@@ -1382,7 +1371,7 @@ end
 
 -- Where this train can take passengers and mail: dests[base][site id] = site, for numbered
 -- sites (towns, Spaceports) with a stop on its schedule or among its interrupt targets, and,
--- for a wildcard target like "[item wildcard] stop", every site whose cargo would name a stop
+-- for a wildcard target like "[item wildcard] unload", every site whose cargo would name a stop
 -- there. Only stops the train can reach by rail count. Cached for 10 s.
 local function train_dests(train)
   storage.dest_cache = storage.dest_cache or {}
@@ -2025,8 +2014,9 @@ local function apply_wagon_capacity()
         local inv = w.get_inventory(defines.inventory.cargo_wagon)
         local cur = w.get_inventory_size_override(defines.inventory.cargo_wagon)
         if (cur or 0) < slots and #inv < slots then
+          local old = #inv
           w.set_inventory_size_override(defines.inventory.cargo_wagon, slots)
-          inv = w.get_inventory(defines.inventory.cargo_wagon)
+          extend_wagon_filters(w.get_inventory(defines.inventory.cargo_wagon), old)
         elseif #inv > slots and #inv - inv.count_empty_stacks() <= slots then
           inv.sort_and_merge() -- filled stacks first, so the slots that go are empty
           local tail_empty = true
@@ -2035,7 +2025,6 @@ local function apply_wagon_capacity()
           end
           if tail_empty then w.set_inventory_size_override(defines.inventory.cargo_wagon, slots) end
         end
-        if inv and inv.valid then extend_wagon_filters(inv) end
       end
     end
   end
