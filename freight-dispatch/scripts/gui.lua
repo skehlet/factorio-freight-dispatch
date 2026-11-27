@@ -69,6 +69,12 @@ Rail signal: one train per block, place it where trains should wait. Chain signa
 - Full loads only: enable a town's stop while [item=fd-passengers] Passengers > 4000.
 [item=fd-decider] Decider combinator (Shop, no power) combines conditions: box -> decider input, decider output -> stop. Output [virtual-signal=signal-red] = 1 when it should stop, and enable the stop while [virtual-signal=signal-red] = 0. For example, steel mill ore stop: [item=fd-iron-ore] Iron ore > 15000 OR [item=fd-coal] Coal < 1000.
 [item=fd-arithmetic] Arithmetic combinator (Shop, no power) does maths on signals. Stop priority only goes from 0 to 255 (higher wins, then the nearest), so to send trains to the busiest town, output [item=fd-passengers] Passengers / 20 as [virtual-signal=signal-W], wire it to every same-named stop and tick "Set priority" with [virtual-signal=signal-W].
+[item=fd-selector] Selector combinator (Shop, no power). The item wildcard picks the first destination over its threshold (the lowest number), not the one with most riders. To send trains where most riders aboard are going, at each town stop:
+- Tick "Read train contents" and "Send to train". Red wire: stop -> selector input, set to "Select input", sort descending, index 0.
+- Green wire: selector output -> [item=fd-arithmetic] arithmetic input, [virtual-signal=signal-each] + 1000000 -> [virtual-signal=signal-each]; arithmetic output -> stop (green).
+- Interrupt: "Circuit condition [virtual-signal=signal-signal-parameter] > 500000" (the signal wildcard; the item wildcard doesn't work in circuit conditions) AND "Destination not full [virtual-signal=signal-signal-parameter] unload", target "[virtual-signal=signal-signal-parameter] unload". Put it above your item wildcard interrupts, which stay as the fallback when that stop is full.
+- Keep the stop -> selector wire free of anything else (Site signals there would add its piles). Each stop a train waits at needs its own selector and arithmetic.
+- Spaceport riders win the selector even while the pad's stop is closed, and the train then falls back. To leave them out, add a [item=constant-combinator] Constant combinator (Shop) on the stop -> selector wire with -1000000 for each Spaceport's colonists and mail (e.g. [item=fd-passengers-17] and [item=fd-mail-17]). Your Spaceport interrupts above still take them there when the pad needs them.
 ]]
 
 local function hud(player)

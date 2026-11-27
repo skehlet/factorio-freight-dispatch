@@ -336,6 +336,29 @@ do
   })
 end
 
+-- Selector combinator that needs no power (Shop, 0.9.3). Steve's wildcard interrupts pick the
+-- FIRST destination item over a threshold (lowest town number), not the biggest, so far towns
+-- starved. Stop reads train contents -> selector "max" -> arithmetic "+1,000,000" -> stop with
+-- "Send to train" -> interrupt "circuit [item wildcard] > 500,000" sends it where most riders go.
+do
+  local sc = table.deepcopy(data.raw["selector-combinator"]["selector-combinator"])
+  local icons = { { icon = "__base__/graphics/icons/selector-combinator.png", icon_size = 64, tint = { 1, 0.85, 0.45, 1 } } }
+  sc.name = "fd-selector"
+  sc.icon = nil
+  sc.icons = icons
+  sc.minable = { mining_time = 0.1, result = "fd-selector" }
+  sc.energy_source = { type = "void" }
+  sc.fast_replaceable_group = nil
+  sc.next_upgrade = nil
+  data:extend({
+    sc,
+    { type = "item", name = "fd-selector", icons = icons, subgroup = "fd-cargo", order = "y4", place_result = "fd-selector", stack_size = 50 },
+    { type = "recipe", name = "fd-selector", enabled = false,
+      ingredients = { { type = "item", name = "electronic-circuit", amount = 5 } },
+      results = { { type = "item", name = "fd-selector", amount = 1 } } },
+  })
+end
+
 -- Map memory (0.7.6): an invisible radar that needs no power and keeps the chunks around it
 -- live on the map (no fog of war). The script places one per block of charted land, so
 -- anything you've seen once stays visible. It scans nothing farther out, so it never

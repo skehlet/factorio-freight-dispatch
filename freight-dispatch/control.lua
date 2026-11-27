@@ -1356,7 +1356,16 @@ local function extend_wagon_filters(inv, old)
 end
 M.extend_wagon_filters = extend_wagon_filters
 
-local PARAM = "[virtual-signal=signal-item-parameter]"
+-- Stop-name wildcards: the item wildcard (bound by "item count" conditions) and, since 0.9.3,
+-- the signal wildcard (bound by circuit conditions, e.g. the "most riders" selector dispatch).
+-- Both turn into "[item=fd-passengers-N]" etc. when the destination is an item.
+local PARAMS = { "[virtual-signal=signal-item-parameter]", "[virtual-signal=signal-signal-parameter]" }
+local function find_param(station)
+  for _, p in pairs(PARAMS) do
+    local i, j = station:find(p, 1, true)
+    if i then return i, j end
+  end
+end
 
 local function stops_named(name)
   return game.train_manager.get_train_stops({ station_name = name, surface = C.SURFACE })
@@ -1371,7 +1380,7 @@ end
 
 -- Where this train can take passengers and mail: dests[base][site id] = site, for numbered
 -- sites (towns, Spaceports) with a stop on its schedule or among its interrupt targets, and,
--- for a wildcard target like "[item wildcard] unload", every site whose cargo would name a stop
+-- for a wildcard target like "[item wildcard] unload" (or the signal wildcard), every site whose cargo would name a stop
 -- there. Only stops the train can reach by rail count. Cached for 10 s.
 local function train_dests(train)
   storage.dest_cache = storage.dest_cache or {}
@@ -1380,7 +1389,7 @@ local function train_dests(train)
   local names, patterns = {}, {}
   local function add(station)
     if not station or station == "" then return end
-    if station:find(PARAM, 1, true) then patterns[station] = true else names[station] = true end
+    if find_param(station) then patterns[station] = true else names[station] = true end
   end
   pcall(function()
     local sch = train.get_schedule()
@@ -1408,7 +1417,7 @@ local function train_dests(train)
     end
   end
   for pat in pairs(patterns) do
-    local i, j = pat:find(PARAM, 1, true)
+    local i, j = find_param(pat)
     for n, sid in pairs(storage.dest_sites or {}) do
       local s = storage.sites[sid]
       if s then
@@ -1634,7 +1643,14 @@ local function service_train(train)
           if want > 0 then
             if o.to then
               local parts = split_by_weight(want, o.to)
-              for k, d in ipairs(o.to) do
+              -- 0.9.5: start at a random destination. In id order, a nearly full wagon always
+              -- ran out of room before the high-numbered towns, so fewer riders boarded for
+              -- them (on Steve's save: 37k delivered to town 1 against 7k to town 10 in 10 min).
+              local nto = #o.to
+              local first = math.floor(rand() * nto)
+              for step = 0, nto - 1 do
+                local k = (first + step) % nto + 1
+                local d = o.to[k]
                 local v = C.variant(o.item, d.site.no)
                 local got = wagon_insert(inv, v, parts[k])
                 if got > 0 then

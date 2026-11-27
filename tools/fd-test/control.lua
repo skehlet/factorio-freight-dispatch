@@ -8,6 +8,7 @@ local Y = 1000
 
 local function L(...) log("FDTEST " .. table.concat({ ... }, " ")) end
 local dest_check
+local sel_next
 
 local function build()
   local surf = game.surfaces["freight"]
@@ -282,6 +283,160 @@ dest_check = function(tick)
   end
 end
 
+-- 0.9.3 "most riders" dispatch: a second line at Y-200 with towns C (x=0), D (180), E (360).
+-- A train at D (drop-off) carries riders for C and E. Both stops at D read train contents
+-- and send to train; red -> fd-selector (max) -> fd-arithmetic (each + 1,000,000) -> green.
+-- Interrupt "item count [wildcard] > 0 AND circuit [wildcard] > 500,000 -> [wildcard] unload".
+-- Phases (one per visit to D): C 500/E 1500 -> E;  C 1500/E 500 -> C;  then the control, a
+-- plain "item count [wildcard] > 0" interrupt with C 500/E 1500 -> C (first match by item
+-- order: the bias seen on Steve's save). Also tried: circuit [wildcard] alone (never fires).
+local Y2 = Y - 200
+local P = { type = "virtual", name = "signal-item-parameter" }
+local S = { type = "virtual", name = "signal-signal-parameter" }
+local PT = "[virtual-signal=signal-item-parameter] unload"
+local ST = "[virtual-signal=signal-signal-parameter] unload"
+local SEL_PHASES = {
+  { name = "item wildcard in circuit", c = 500, e = 1500, expect = "E", target = PT,
+    conds = { { type = "circuit", condition = { first_signal = P, comparator = ">", constant = 500000 } } } },
+  { name = "signal wildcard", c = 500, e = 1500, expect = "E", target = ST,
+    conds = { { type = "circuit", condition = { first_signal = S, comparator = ">", constant = 500000 } } } },
+  { name = "signal wildcard", c = 1500, e = 500, expect = "C", target = ST,
+    conds = { { type = "circuit", condition = { first_signal = S, comparator = ">", constant = 500000 } } } },
+  { name = "signal wildcard + dest not full", c = 500, e = 1500, expect = "E", target = ST,
+    conds = { { type = "circuit", condition = { first_signal = S, comparator = ">", constant = 500000 } },
+              { type = "specific_destination_not_full", station = ST } } },
+  { name = "control: item count wildcard", c = 500, e = 1500, expect = "C", target = PT,
+    conds = { { type = "item_count", condition = { first_signal = P, comparator = ">", constant = 0 } } } },
+  -- 0.9.4: a constant combinator on the stop -> selector wire puts -1,000,000 on E's riders
+  -- (as for a Spaceport), so the selector picks C although E has more aboard
+  { name = "signal wildcard, E excluded", c = 500, e = 1500, expect = "C", target = ST, exclude_e = true,
+    conds = { { type = "circuit", condition = { first_signal = S, comparator = ">", constant = 500000 } },
+              { type = "specific_destination_not_full", station = ST } } },
+}
+
+local function sel_inject(c, e)
+  local s = storage.sel
+  local w = s.train.cargo_wagons[1]
+  local inv = w.get_inventory(defines.inventory.cargo_wagon)
+  local got = {}
+  for _, pass in pairs({ "remove", "add" }) do
+    for k, n in pairs({ C = c, E = e }) do
+      local item = "fd-passengers-" .. s.no[k]
+      local have = inv.get_item_count(item)
+      if pass == "add" and n > have then remote.call("freight_dispatch", "inject_cargo", w, item, n - have, s.origin)
+      elseif pass == "remove" and n < have then inv.remove({ name = item, count = have - n }) end
+      got[k] = inv.get_item_count(item)
+    end
+  end
+  return got
+end
+
+-- start the next phase: install its interrupt and set the riders aboard
+sel_next = function(tick)
+  local s = storage.sel
+  s.phase = (s.phase or 0) + 1
+  s.left, s.since = false, tick
+  local ph = SEL_PHASES[s.phase]
+  if not ph then s.phase, s.done = nil, true L("sel done") return end
+  local sch = s.train.get_schedule()
+  while sch.interrupt_count > 0 do sch.remove_interrupt(1) end
+  sch.add_interrupt({ name = ph.name, conditions = ph.conds,
+    targets = { { station = ph.target, wait_conditions = { { type = "time", ticks = 120 } } } } })
+  if ph.exclude_e and s.const and s.const.valid then
+    local sec = s.const.get_control_behavior().get_section(1) or s.const.get_control_behavior().add_section()
+    sec.set_slot(1, { value = { type = "item", name = "fd-passengers-" .. s.no.E, quality = "normal" }, min = -1000000 })
+  end
+  local got = sel_inject(ph.c, ph.e)
+  L("sel phase " .. s.phase .. " (" .. ph.name .. ") aboard C=" .. got.C .. " E=" .. got.E .. ", expect " .. ph.expect)
+end
+
+local function sel_build()
+  local surf = game.surfaces["freight"]
+  local tiles = {}
+  for x = -80, 440 do
+    for y = Y2 - 40, Y2 + 40 do tiles[#tiles + 1] = { name = "grass-1", position = { x, y } } end
+  end
+  surf.set_tiles(tiles)
+  for _, e in pairs(surf.find_entities_filtered({ area = { { -80, Y2 - 40 }, { 440, Y2 + 40 } } })) do
+    if e.valid and e.type ~= "character" then e.destroy() end
+  end
+  local ids = {}
+  for k, x in pairs({ C = 0, D = 180, E = 360 }) do ids[k] = remote.call("freight_dispatch", "create_site", "town", x, Y2, 3000) end
+  for x = -40, 400, 2 do surf.create_entity({ name = "straight-rail", position = { x, Y2 }, direction = defines.direction.east, force = "player" }) end
+  local function stop_at(x, dir)
+    for _, off in pairs({ { 0, 2 }, { 0, -2 }, { 1, 2 }, { 1, -2 }, { -1, 2 }, { -1, -2 } }) do
+      local s = surf.create_entity({ name = "train-stop", position = { x + off[1], Y2 + off[2] }, direction = dir, force = "player", raise_built = true })
+      if s and s.connected_rail then return s end
+      if s then s.destroy() end
+    end
+  end
+  local E_, W_ = defines.direction.east, defines.direction.west
+  local stops = { C = stop_at(10, W_), D = stop_at(184, E_), D2 = stop_at(178, W_), E = stop_at(350, E_) }
+  if not (stops.C and stops.D and stops.D2 and stops.E) then L("sel stop FAILED") return end
+  stops.D2.backer_name = stops.D.backer_name -- one station at D for both directions
+  local no = {}
+  for k, id in pairs(ids) do no[k] = remote.call("freight_dispatch", "site", id).no end
+  L("sel towns C/D/E no=" .. serpent.line(no) .. " stops C=" .. stops.C.backer_name .. " D=" .. stops.D.backer_name .. " E=" .. stops.E.backer_name)
+  local W = defines.wire_connector_id
+  for _, sd in pairs({ stops.D, stops.D2 }) do
+    local cb = sd.get_or_create_control_behavior()
+    cb.read_from_train = true
+    cb.send_to_train = true
+  end
+  local ok = {}
+  ok[1] = stops.D.get_wire_connector(W.circuit_red, true).connect_to(stops.D2.get_wire_connector(W.circuit_red, true))
+  ok[2] = stops.D.get_wire_connector(W.circuit_green, true).connect_to(stops.D2.get_wire_connector(W.circuit_green, true))
+  local sp = surf.find_non_colliding_position("fd-selector", { stops.D.position.x - 1, stops.D.position.y + 3 }, 8, 0.5)
+  local sel = sp and surf.create_entity({ name = "fd-selector", position = sp, force = "player", raise_built = true })
+  local ap = sel and surf.find_non_colliding_position("fd-arithmetic", { stops.D.position.x + 2, stops.D.position.y + 3 }, 8, 0.5)
+  local ar = ap and surf.create_entity({ name = "fd-arithmetic", position = ap, force = "player", raise_built = true })
+  L("sel placed selector=" .. tostring(sel ~= nil) .. " arithmetic=" .. tostring(ar ~= nil))
+  if not (sel and ar) then return end
+  ok[3] = stops.D.get_wire_connector(W.circuit_red, true).connect_to(sel.get_wire_connector(W.combinator_input_red, true))
+  ok[4] = sel.get_wire_connector(W.combinator_output_green, true).connect_to(ar.get_wire_connector(W.combinator_input_green, true))
+  ok[5] = ar.get_wire_connector(W.combinator_output_green, true).connect_to(stops.D.get_wire_connector(W.circuit_green, true))
+  -- a vanilla constant combinator (Shop, 0.9.4) on the stop -> selector red wire, empty until phase 6
+  local cp = surf.find_non_colliding_position("constant-combinator", { stops.D.position.x - 3, stops.D.position.y + 3 }, 8, 0.5)
+  local const = cp and surf.create_entity({ name = "constant-combinator", position = cp, force = "player", raise_built = true })
+  ok[6] = const and const.get_wire_connector(W.circuit_red, true).connect_to(stops.D.get_wire_connector(W.circuit_red, true))
+  L("sel wires connected=" .. serpent.line(ok) .. " shop constant recipe enabled=" .. tostring(game.forces.player.recipes["constant-combinator"].enabled))
+  sel.get_control_behavior().parameters = { operation = "select", select_max = true, index_constant = 0 }
+  local each = { type = "virtual", name = "signal-each" }
+  ar.get_control_behavior().parameters = { first_signal = each, operation = "+", second_constant = 1000000, output_signal = each }
+  -- the train: loco, wagon, reversed loco, west of D's east-facing stop, heading east
+  local l1 = surf.create_entity({ name = "locomotive", position = { 160, Y2 }, direction = defines.direction.east, force = "player" })
+  surf.create_entity({ name = "cargo-wagon", position = { 153, Y2 }, direction = defines.direction.east, force = "player" })
+  surf.create_entity({ name = "locomotive", position = { 146, Y2 }, direction = defines.direction.west, force = "player" })
+  local t = l1 and l1.train
+  if not t then L("sel no train") return end
+  t.get_schedule().add_record({ station = stops.D.backer_name, wait_conditions = { { type = "empty" }, { type = "time", ticks = 120, compare_type = "or" } } })
+  t.manual_mode = false
+  storage.sel = { train = t, dname = stops.D.backer_name, sel = sel, const = const, no = no, origin = 1, phases = SEL_PHASES,
+    dstops = { D = stops.D, D2 = stops.D2 }, stopname = { [stops.C.backer_name] = "C", [stops.E.backer_name] = "E" } }
+end
+
+script.on_event(defines.events.on_train_changed_state, function(e)
+  local s = storage.sel
+  if not (s and s.train.valid and e.train.id == s.train.id) then return end
+  local t = s.train
+  local at_d = t.station and t.station.backer_name == s.dname
+  if s.done then return end
+  if t.state == defines.train_state.wait_station and at_d then
+    sel_next(e.tick)
+  elseif e.old_state == defines.train_state.wait_station and s.phase and not s.left then
+    local sch = t.get_schedule()
+    local r = sch.get_record({ schedule_index = sch.current })
+    if r and r.station ~= s.dname then
+      s.left = true
+      local ph = s.phases[s.phase]
+      local went = s.stopname[r.station] or r.station
+      local out = s.sel.get_circuit_network(defines.wire_connector_id.combinator_output_green)
+      L("sel phase " .. s.phase .. " (" .. ph.name .. ") -> " .. went .. (went == ph.expect and " OK" or " WRONG, expected " .. ph.expect) ..
+        " selector_out=" .. serpent.line(out and out.signals))
+    end
+  end
+end)
+
 -- top speed tracking (tiles/tick), to verify the fuel upgrade
 script.on_event(defines.events.on_tick, function()
   local t = storage.train
@@ -327,6 +482,30 @@ script.on_nth_tick(600, function(e)
     storage.built = true
     build()
     return
+  end
+  if e.tick == 1200 then sel_build() end
+  local sl = storage.sel
+  if sl and sl.train.valid and e.tick % 1200 == 0 then
+    local W = defines.wire_connector_id
+    local function sig(ent, id)
+      local n = ent.get_circuit_network(id)
+      local o = {}
+      for _, x in pairs(n and n.signals or {}) do o[#o + 1] = x.signal.name .. "=" .. x.count end
+      return table.concat(o, ",")
+    end
+    L("sel t=" .. e.tick .. " state=" .. sl.train.state .. " at=" .. tostring(sl.train.station and sl.train.station.backer_name) ..
+      " sel_in[" .. sig(sl.sel, W.combinator_input_red) .. "] sel_out[" .. sig(sl.sel, W.combinator_output_green) .. "]")
+    for k, st in pairs(sl.dstops or {}) do
+      local cb = st.get_control_behavior()
+      L("sel   stop " .. k .. " @" .. st.position.x .. " train=" .. tostring(st.get_stopped_train() ~= nil) .. " read=" .. tostring(cb and cb.read_from_train) ..
+        " send=" .. tostring(cb and cb.send_to_train) .. " red[" .. sig(st, W.circuit_red) .. "] green[" .. sig(st, W.circuit_green) .. "]")
+    end
+  end
+  -- a phase whose train never leaves D: log it and move on to the next phase
+  if sl and sl.train.valid and sl.phase and sl.train.station and sl.train.station.backer_name == sl.dname and not sl.left
+    and sl.since and e.tick - sl.since >= 900 then
+    L("sel phase " .. sl.phase .. " (" .. sl.phases[sl.phase].name .. ") STUCK at D: the interrupt never fired")
+    sel_next(e.tick)
   end
   if e.tick >= 1200 and e.tick <= 3000 then circuit_check(e.tick) end
   dest_check(e.tick)
