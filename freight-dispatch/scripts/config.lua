@@ -24,6 +24,11 @@ C.SPARE_SITES_RATIO = 0.5
 C.FOUND_MIN = 280          -- 0.7.2: was 200
 C.FOUND_MAX = 700          -- 0.7.2: was 500
 C.FOUND_GAP = 30 * 60
+-- 0.9.6 (Steve): a founding waits a random 3 to 10 minutes after it becomes due (e.g. after
+-- your first stop at a site opens room under the cap), so a new stop isn't instantly followed
+-- by a "new site founded" alert. The first Spaceport and bought ones are not delayed.
+C.FOUND_DELAY_MIN = 3 * 3600
+C.FOUND_DELAY_MAX = 10 * 3600  -- about one site per 6.5 min at most while there's room (his 0.9.5 game founded one per ~5 min)
 -- Supply-chain order for founding (0.4.6, Steve asked: he had spare iron, steel and factories
 -- but no lumber camp to connect). The first tier with a kind that has no unserved site gets
 -- that kind next. Tiers marked `basic` are founded even when the spare-site cap is full, so
@@ -82,7 +87,7 @@ C.SHOP = {
   { item = "landfill", ghost = true, note = "Fill in water to build across lakes." },
   { item = "fd-site-signals", ghost = true, note = "Build in a site's ring: outputs its stockpile as circuit signals. Wire it to a stop or rail signal (see Help)." },
   { item = "fd-decider", ghost = true, note = "Needs no power. Combine conditions with AND/OR, e.g. Steel > 15000 OR Lumber < 1000 (see Help)." },
-  { item = "fd-arithmetic", ghost = true, note = "Needs no power. Does maths on signals, e.g. Passengers / 20 to set a stop's priority (see Help)." },
+  { item = "fd-arithmetic", ghost = true, note = "Needs no power. Does maths on signals, e.g. Passengers / 2 to set a stop's priority (see Help)." },
   { item = "constant-combinator", ghost = true, note = "Needs no power. Outputs fixed signals, e.g. -1,000,000 for Spaceport riders so a selector ignores them (see Help)." },
   { item = "fd-selector", ghost = true, note = "Needs no power. Picks the biggest signal, e.g. send trains where most riders aboard are going (see Help)." },
 }
@@ -124,12 +129,23 @@ C.UPGRADES = {
     { name = "Jet boots", speed = 3, price = 8000000, rockets = 1, desc = "Run four times as fast" },
     { name = "Warp boots", speed = 5, price = 16000000, rockets = 1, desc = "Run six times as fast" },
   } },
+  -- 0.9.7 (Steve): a late-game cash sink that speeds up the last rockets. Multiplies every
+  -- mine, lumber camp, steel mill and factory (primary output and processing speed). His
+  -- 0.9.x game ended with $1.05B unspent at about $10M/min; these four total $750M.
+  { id = "industry", label = "Industry", icon = "item/assembling-machine-2", tiers = {
+    { name = "Standard works", mult = 1, desc = "Industries at normal speed" },
+    { name = "Extra shifts", mult = 1.25, price = 50000000, rockets = 1, desc = "Mines, camps, mills and factories x1.25" },
+    { name = "Modern machinery", mult = 1.5, price = 100000000, rockets = 1, desc = "Mines, camps, mills and factories x1.5" },
+    { name = "Automated works", mult = 2, price = 200000000, rockets = 1, desc = "Mines, camps, mills and factories x2" },
+    { name = "Megaworks", mult = 3, price = 400000000, rockets = 1, desc = "Mines, camps, mills and factories x3" },
+  } },
 }
 
 -- Cargo: rate = $ per unit per 100 tiles; decay = seconds after the grace period until pay is at its minimum
 C.CARGO = {
-  ["fd-passengers"] = { rate = 3.0, decay = 150, label = "Passengers" },
-  ["fd-mail"]       = { rate = 3.5, decay = 200, label = "Mail" },
+  -- 0.9.8: x10 (C.TOWN_SCALE), as each unit now stands for ten (was 3.0 and 3.5)
+  ["fd-passengers"] = { rate = 30, decay = 150, label = "Passengers" },
+  ["fd-mail"]       = { rate = 35, decay = 200, label = "Mail" },
   ["fd-coal"]       = { rate = 1.0, decay = 1500, label = "Coal" },
   ["fd-iron-ore"]   = { rate = 1.0, decay = 1500, label = "Iron ore" },
   ["fd-wood"]       = { rate = 1.2, decay = 1000, label = "Lumber" },
@@ -186,6 +202,12 @@ C.PAX_PER_POP = 120          -- a town makes pop / PAX_PER_POP passengers per se
 C.INCOME_LOG_TICKS = 10 * 60 * 60 -- earnings by cargo are snapshotted this often (storage.income_log)
 -- town cargo (everything else counts as freight, e.g. for contract weighting and size)
 C.TOWN_CARGO = { ["fd-passengers"] = true, ["fd-mail"] = true }
+-- 0.9.8 (Steve: "a town of 4,386 with 19,670 passengers waiting"): passengers and mail are
+-- counted in units of TOWN_SCALE people/letters of the old scale. Towns make 1/TOWN_SCALE as
+-- many, wagons hold 1/TOWN_SCALE as many (stack 5), each one pays TOWN_SCALE times the fare,
+-- costs TOWN_SCALE units of loading capacity, and rockets, contracts and caps shrink to match.
+-- So trains fill, run and earn exactly as before; only the numbers are believable.
+C.TOWN_SCALE = 10
 
 -- Primary industries: output = base x (1 + LEVEL_BONUS x (level - 1)) x service.
 -- Secondary industries process up to PROCESS_RATE x level of their main input per second.
@@ -249,11 +271,12 @@ C.SPACEPORT = {
   -- 0.7.1: build_secs 10 min (was 15); mail half the colonists; goods added.
   build_secs = 3 * 60,
   levels = {
-    { colonists = 4000, mail = 2000, goods = 24000, cost = 4000000 },
-    { colonists = 6000, mail = 3000, goods = 36000, cost = 5000000 },
-    { colonists = 8000, mail = 4000, goods = 48000, cost = 6000000 },
-    { colonists = 10000, mail = 5000, goods = 60000, cost = 7000000 },
-    { colonists = 12000, mail = 6000, goods = 72000, cost = 8000000 },
+    -- 0.9.8: colonists and mail / 10 (C.TOWN_SCALE); they were 4,000..12,000 and 2,000..6,000
+    { colonists = 400, mail = 200, goods = 24000, cost = 4000000 },
+    { colonists = 600, mail = 300, goods = 36000, cost = 5000000 },
+    { colonists = 800, mail = 400, goods = 48000, cost = 6000000 },
+    { colonists = 1000, mail = 500, goods = 60000, cost = 7000000 },
+    { colonists = 1200, mail = 600, goods = 72000, cost = 8000000 },
   },
   level_at = { 3, 8, 15, 25 }, -- launches done to reach level 2, 3, 4, 5
   -- 0.7.8 (Steve): satellites multiply town passengers and mail and power plant supply radius

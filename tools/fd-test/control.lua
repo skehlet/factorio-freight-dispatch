@@ -275,7 +275,7 @@ dest_check = function(tick)
   if tick == 4800 then
     -- mail for starter town 1, which the shuttle never visits, into the mail-filtered wagon 2: it
     -- should get off at the next town (town A or B stock) with a flying text
-    L("stranded injected=" .. remote.call("freight_dispatch", "inject_cargo", t.cargo_wagons[2], "fd-mail-1", 300, storage.town_a))
+    L("stranded injected=" .. remote.call("freight_dispatch", "inject_cargo", t.cargo_wagons[2], "fd-mail-1", 30, storage.town_a))
   end
   if tick >= 1200 and tick <= 9000 and tick % 1200 == 0 or tick == 4800 + 600 or tick == 4800 + 1200 then
     L("w1 " .. wagon_summary(t.cargo_wagons[1]))
@@ -287,8 +287,9 @@ end
 -- A train at D (drop-off) carries riders for C and E. Both stops at D read train contents
 -- and send to train; red -> fd-selector (max) -> fd-arithmetic (each + 1,000,000) -> green.
 -- Interrupt "item count [wildcard] > 0 AND circuit [wildcard] > 500,000 -> [wildcard] unload".
--- Phases (one per visit to D): C 500/E 1500 -> E;  C 1500/E 500 -> C;  then the control, a
--- plain "item count [wildcard] > 0" interrupt with C 500/E 1500 -> C (first match by item
+-- Phases (one per visit to D): C 50/E 150 -> E;  C 150/E 50 -> C;  then the control, a
+-- plain "item count [wildcard] > 0" interrupt with C 50/E 150 -> C (0.9.8: a tenth of the old
+-- numbers, as a wagon now holds 200 passengers) (first match by item
 -- order: the bias seen on Steve's save). Also tried: circuit [wildcard] alone (never fires).
 local Y2 = Y - 200
 local P = { type = "virtual", name = "signal-item-parameter" }
@@ -296,20 +297,20 @@ local S = { type = "virtual", name = "signal-signal-parameter" }
 local PT = "[virtual-signal=signal-item-parameter] unload"
 local ST = "[virtual-signal=signal-signal-parameter] unload"
 local SEL_PHASES = {
-  { name = "item wildcard in circuit", c = 500, e = 1500, expect = "E", target = PT,
+  { name = "item wildcard in circuit", c = 50, e = 150, expect = "E", target = PT,
     conds = { { type = "circuit", condition = { first_signal = P, comparator = ">", constant = 500000 } } } },
-  { name = "signal wildcard", c = 500, e = 1500, expect = "E", target = ST,
+  { name = "signal wildcard", c = 50, e = 150, expect = "E", target = ST,
     conds = { { type = "circuit", condition = { first_signal = S, comparator = ">", constant = 500000 } } } },
-  { name = "signal wildcard", c = 1500, e = 500, expect = "C", target = ST,
+  { name = "signal wildcard", c = 150, e = 50, expect = "C", target = ST,
     conds = { { type = "circuit", condition = { first_signal = S, comparator = ">", constant = 500000 } } } },
-  { name = "signal wildcard + dest not full", c = 500, e = 1500, expect = "E", target = ST,
+  { name = "signal wildcard + dest not full", c = 50, e = 150, expect = "E", target = ST,
     conds = { { type = "circuit", condition = { first_signal = S, comparator = ">", constant = 500000 } },
               { type = "specific_destination_not_full", station = ST } } },
-  { name = "control: item count wildcard", c = 500, e = 1500, expect = "C", target = PT,
+  { name = "control: item count wildcard", c = 50, e = 150, expect = "C", target = PT,
     conds = { { type = "item_count", condition = { first_signal = P, comparator = ">", constant = 0 } } } },
   -- 0.9.4: a constant combinator on the stop -> selector wire puts -1,000,000 on E's riders
   -- (as for a Spaceport), so the selector picks C although E has more aboard
-  { name = "signal wildcard, E excluded", c = 500, e = 1500, expect = "C", target = ST, exclude_e = true,
+  { name = "signal wildcard, E excluded", c = 50, e = 150, expect = "C", target = ST, exclude_e = true,
     conds = { { type = "circuit", condition = { first_signal = S, comparator = ">", constant = 500000 } },
               { type = "specific_destination_not_full", station = ST } } },
 }

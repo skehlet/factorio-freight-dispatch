@@ -37,7 +37,7 @@ for _, c in pairs(cargo) do
       },
       subgroup = "fd-cargo",
       order = c.order,
-      stack_size = 50,
+      stack_size = 50, -- passengers and mail: set below (0.9.8)
       -- 0.7.3: listed in wagon slot filters (middle click). Filter pickers only show unlocked
       -- items, and these have no recipe, so without this they never appear there.
       flags = { "always-show" },
@@ -49,13 +49,16 @@ end
 -- A coloured disc (graphics/dest/disc.png tinted per destination), the cargo picture and the
 -- number. Each kind gets its own row in the item picker.
 local C = require("scripts.config")
+-- 0.9.8: passengers and mail come in smaller numbers (C.TOWN_SCALE), so a stack holds 5
+for b in pairs(C.TOWN_CARGO) do data.raw.item[b].stack_size = 50 / C.TOWN_SCALE end
 data:extend({
   { type = "item-subgroup", name = "fd-dest-passengers", group = "freight-dispatch", order = "b" },
   { type = "item-subgroup", name = "fd-dest-mail", group = "freight-dispatch", order = "c" },
 })
 local dest_pictures = {
-  ["fd-passengers"] = { icon = "__core__/graphics/icons/entity/character.png", scale = 0.36, shift = { -2, -3 } },
-  ["fd-mail"] = { icon = "__freight-dispatch__/graphics/mail.png", scale = 0.32, shift = { -2, -4 } },
+  -- 0.10.0: picture up and to the right, number bottom left (the item count is bottom right)
+  ["fd-passengers"] = { icon = "__core__/graphics/icons/entity/character.png", scale = 0.34, shift = { 3, -4 } },
+  ["fd-mail"] = { icon = "__freight-dispatch__/graphics/mail.png", scale = 0.3, shift = { 3, -5 } },
 }
 for n = 1, C.DESTS do
   local col = C.DEST_COLORS[n]
@@ -76,7 +79,7 @@ for n = 1, C.DESTS do
         },
         subgroup = "fd-dest-" .. short,
         order = string.format("%02d", n),
-        stack_size = 50,
+        stack_size = 50 / C.TOWN_SCALE, -- 0.9.8: 5
         flags = { "always-show" },
       },
     })

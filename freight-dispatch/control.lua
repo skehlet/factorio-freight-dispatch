@@ -246,6 +246,16 @@ local function load_rate()
   return upgrade_tier("loading").rate
 end
 
+-- 0.9.7: the Industry upgrade (mines, camps, mills and factories)
+local function industry_mult()
+  return upgrade_tier("industry").mult or 1
+end
+M.industry_mult = industry_mult
+
+local function industry_part(m)
+  if industry_mult() > 1 then table.insert(m, string.format("industry x%g", industry_mult())) end
+end
+
 -- price of a whole entity/tile prototype (sum of items needed to place it)
 local function prototype_cost(proto)
   if not proto then return nil end
@@ -671,8 +681,9 @@ function M.site_detail(site)
     else
       if lvl > 1 then table.insert(m, string.format("level x%g", lvl)) end
       power_part(site, m)
+      industry_part(m)
       if svc < 0.95 then table.insert(m, string.format("service x%.2f", svc)) end
-      s = string.format("Producing %.1f %s/s", base * lvl * svc * power_mult(site), icon(item)) .. mults(m)
+      s = string.format("Producing %.1f %s/s", base * lvl * svc * power_mult(site) * industry_mult(), icon(item)) .. mults(m)
     end
     return s .. SEP .. next_level(site, site.shipped)
   elseif kind.main then
@@ -691,6 +702,7 @@ function M.site_detail(site)
         table.insert(m, "boost x1.0, no " .. icon(kind.booster))
       end
       power_part(site, m)
+      industry_part(m)
       s = string.format("Making %.1f %s/s from %.1f %s/s", site.made or 0, icon(kind.produces[1]),
         site.used or 0, icon(kind.main)) .. mults(m)
     end
@@ -731,28 +743,38 @@ local function draw_site(site)
   draw_detail(site)
 end
 
--- Power plant supply area: a faint circle on the ground and on the map, dimmed when dry
+-- Power plant supply area: a circle on the ground and on the map, dimmed when dry
 local function update_supply_circle(site)
   if site.kind ~= "power-plant" or not site.render then return end
   local on = plant_running(site)
   -- 0.8.1 (Steve: more noticeable still): opaque, more saturated purple, widths 12 / 6.
   -- 0.5.3: 0.75 / 0.2 and widths 6 / 3; before that 0.45 / 0.12 and 4 / 2.
+  -- 0.9.7 (Steve: still hard to see zoomed out on the map): line widths don't grow as the map
+  -- zooms out, so the map also gets a light filled disc (it scales with the map), and its
+  -- outline goes from 6 to 10.
   local a = on and 1 or 0.35
   local col = { 1 * a, 0.3 * a, 1 * a, a }
-  local w_game, w_map = 12, 6
-  for _, key in pairs({ "supply", "supply_map" }) do
+  -- 0.10.0 (Steve: too opaque where many plants overlap): 0.16 / 0.05 -> 0.06 / 0.02, so
+  -- five overlapping discs are about 27% instead of 58%
+  local fa = on and 0.06 or 0.02
+  local fill = { fa, 0.3 * fa, fa, fa } -- premultiplied
+  local looks = {
+    supply = { col = col, width = 12, filled = false, mode = "game" },
+    supply_map = { col = col, width = 10, filled = false, mode = "chart" },
+    supply_fill = { col = fill, width = 1, filled = true, mode = "chart" },
+  }
+  for key, l in pairs(looks) do
     local o = site.render[key]
     if not (o and o.valid) then
       o = rendering.draw_circle({
-        color = col, radius = supply_radius(site), width = key == "supply" and w_game or w_map, filled = false,
-        target = { site.x, site.y }, surface = surface(), draw_on_ground = true,
-        render_mode = key == "supply" and "game" or "chart",
+        color = l.col, radius = supply_radius(site), width = l.width, filled = l.filled,
+        target = { site.x, site.y }, surface = surface(), draw_on_ground = true, render_mode = l.mode,
       })
       site.render[key] = o
     end
     o.radius = supply_radius(site)
-    o.color = col
-    o.width = key == "supply" and w_game or w_map
+    o.color = l.col
+    o.width = l.width
   end
 end
 
@@ -1044,11 +1066,22 @@ local function maybe_found_site()
     return
   end
   if game.tick < (storage.next_found_tick or 0) then return end
-  if not room_for_site() then
+  local due = room_for_site()
+  if not due then
     local _, basic = urgent_kind(served_ids())
-    if not basic then return end -- cap full, but a missing raw material is still founded
+    due = basic -- cap full, but a missing raw material is still founded
   end
-  if found_site() then storage.next_found_tick = game.tick + C.FOUND_GAP end
+  if not due then storage.found_due = nil return end
+  -- 0.9.6: wait a random while once a founding is due, so it doesn't follow a new stop at once
+  if not storage.found_due then
+    storage.found_due = game.tick + C.FOUND_DELAY_MIN + math.floor(rand() * (C.FOUND_DELAY_MAX - C.FOUND_DELAY_MIN))
+    return
+  end
+  if game.tick < storage.found_due then return end
+  if found_site() then
+    storage.found_due = nil
+    storage.next_found_tick = game.tick + C.FOUND_GAP
+  end
 end
 
 ---------------------------------------------------------------------------
@@ -1637,7 +1670,10 @@ local function service_train(train)
         local share = math.max(1, math.floor(budget / #offers))
         local still = {}
         for _, o in ipairs(offers) do
-          local want = math.min(o.avail, share, budget)
+          -- 0.9.8: a passenger or letter takes C.TOWN_SCALE units of loading capacity, so
+          -- wagons fill at the same pace as before the rescale
+          local k = C.TOWN_CARGO[o.item] and C.TOWN_SCALE or 1
+          local want = math.min(o.avail, math.floor(share / k), math.floor(budget / k))
           local site = o.site
           local ins = 0
           if want > 0 then
@@ -1668,7 +1704,7 @@ local function service_train(train)
             site.shipped = site.shipped + ins
             site.picked_min = site.picked_min + ins
             fl_add(site, "tx:" .. o.item, ins)
-            budget = budget - ins
+            budget = budget - ins * k
             loaded = loaded + ins
             o.avail = o.avail - ins
           end
@@ -1855,7 +1891,10 @@ local function update_spaceport(site)
     if built and st.colonists >= need.colonists and st.mail >= need.mail and st.goods >= need.goods
       and status == defines.rocket_silo_status.rocket_ready then
       no_silo_victory()
-      if silo.launch_rocket() then launch_rocket(site, silo) end
+      -- 0.9.7: send the cargo pod to orbit. With no destination, 2.x sends the pod back down
+      -- to the surface (to 0,0 without a landing pad): Steve saw a "rocket descending into the
+      -- earth" and its shadow flying across the map.
+      if silo.launch_rocket({ type = defines.cargo_destination.orbit }) then launch_rocket(site, silo) end
     end
   elseif built and st.colonists >= need.colonists and st.mail >= need.mail and st.goods >= need.goods then
     launch_rocket(site)
@@ -1870,9 +1909,10 @@ local function simulate_second()
     local cap = C.STOCK_CAP * site.level
     fl_add(site, "secs", 1)
     if site.kind == "town" then
-      local pax = site.pop / C.PAX_PER_POP * service * sat_mult()
-      local mail = site.pop / 400 * service * sat_mult()
-      cap = C.STOCK_CAP + site.pop * 4
+      -- 0.9.8: in units of C.TOWN_SCALE (a town of 4,000 makes about 3 passengers a second)
+      local pax = site.pop / C.PAX_PER_POP * service * sat_mult() / C.TOWN_SCALE
+      local mail = site.pop / 400 * service * sat_mult() / C.TOWN_SCALE
+      cap = (C.STOCK_CAP + site.pop * 4) / C.TOWN_SCALE
       local p0, m0 = site.stock["fd-passengers"] or 0, site.stock["fd-mail"] or 0
       site.stock["fd-passengers"] = math.min(cap, p0 + pax)
       site.stock["fd-mail"] = math.min(cap / 4, m0 + mail)
@@ -1880,7 +1920,7 @@ local function simulate_second()
       fl_add(site, "mk:fd-mail", math.max(0, site.stock["fd-mail"] - m0))
       if site.stock["fd-passengers"] >= cap - 1 then fl_add(site, "full", 1) end
     elseif kind.base then
-      local mult = (1 + C.LEVEL_BONUS * (site.level - 1)) * service
+      local mult = (1 + C.LEVEL_BONUS * (site.level - 1)) * service * industry_mult()
       for item, rate in pairs(kind.base) do
         local s0 = site.stock[item] or 0
         site.stock[item] = math.min(cap, s0 + rate * mult)
@@ -1893,7 +1933,7 @@ local function simulate_second()
       -- steel mill (ore, boosted by coal) and factory (steel, boosted by lumber):
       -- the booster alone makes nothing; it raises the yield of the main input.
       local main = site.input[kind.main] or 0
-      local full_rate = C.PROCESS_RATE * site.level * power_mult(site)
+      local full_rate = C.PROCESS_RATE * site.level * power_mult(site) * industry_mult()
       local p = math.min(main, full_rate)
       local item = kind.produces[1]
       local room = cap - (site.stock[item] or 0)
@@ -2082,7 +2122,7 @@ function M.buy_upgrade(player, id)
   apply_wagon_capacity()
   apply_running_speed()
   game.print("[color=green][font=default-bold]Upgrade bought:[/font][/color] " .. u.label .. " -> [color=yellow]" ..
-    nxt.name .. "[/color]. " .. nxt.desc .. (id == "running" and "." or ", for every train."))
+    nxt.name .. "[/color]. " .. nxt.desc .. ((id == "running" or id == "industry") and "." or ", for every train."))
 end
 
 -- Cargo outside a wagon (in a player's inventory, or in a removed wagon) goes back to the
@@ -2401,6 +2441,7 @@ local function new_contract()
   local scale = 1 + math.min(4, storage.lifetime / 2000000)
   local freight = not C.TOWN_CARGO[c.item]
   local amount = math.floor((rand_int(3, 8) * 500 * scale * (freight and 2 or 1)) / 100) * 100
+  if not freight then amount = math.floor(amount / C.TOWN_SCALE / 10) * 10 end -- 0.9.8
   -- bonus = what the cargo would earn over 1,200 tiles (freight) or 600 tiles (town cargo),
   -- rounded to $100. Freight: double the amount and double the rate (0.3.0).
   local reward = math.floor(amount * C.CARGO[c.item].rate * (freight and 12 or 6) / 100) * 100
@@ -2573,6 +2614,7 @@ script.on_init(function()
     return
   end
   init_storage()
+  storage.town_scale = C.TOWN_SCALE -- 0.9.8: new maps start at the new scale
   if remote.interfaces["freeplay"] then
     local fp = remote.interfaces["freeplay"]
     if fp["set_disable_crashsite"] then remote.call("freeplay", "set_disable_crashsite", true) end
@@ -2592,12 +2634,81 @@ script.on_init(function()
   for _, p in pairs(game.players) do setup_player(p) end
 end)
 
+-- 0.9.8: one-time migration of a save from before the passenger and mail rescale. Everything
+-- counted in passengers or letters shrinks by C.TOWN_SCALE: towns' waiting stock, every wagon
+-- stack (Factorio keeps the old 50-stacks as they are when the stack size drops to 5) and its
+-- origin records, the Spaceports' colonists and mail aboard, contracts and the flow meters.
+local function rescale_town_cargo()
+  local from = storage.town_scale or 1
+  if from >= C.TOWN_SCALE then return end
+  local f = from / C.TOWN_SCALE
+  local function town_key(key) return key:find("fd-passengers", 1, true) or key:find("fd-mail", 1, true) end
+  local function scale_flows(t)
+    for key, v in pairs(t or {}) do
+      if town_key(key) then t[key] = v * f end
+    end
+  end
+  for _, s in pairs(storage.sites) do
+    for b in pairs(C.TOWN_CARGO) do
+      if s.stock[b] then s.stock[b] = s.stock[b] * f end
+    end
+    if s.pad then
+      s.pad.colonists = math.floor((s.pad.colonists or 0) * f)
+      s.pad.mail = math.floor((s.pad.mail or 0) * f)
+    end
+    scale_flows(s.fl_cur)
+    for _, h in pairs(s.fl_hist or {}) do scale_flows(h) end
+  end
+  local before_total, after_total = 0, 0
+  for _, w in pairs(surface().find_entities_filtered({ type = "cargo-wagon" })) do
+    local inv = w.get_inventory(defines.inventory.cargo_wagon)
+    local before, after = {}, {}
+    for i = 1, #inv do
+      local st = inv[i]
+      if st.valid_for_read and C.TOWN_CARGO[C.base(st.name)] then
+        local name, n = st.name, math.floor(st.count * f)
+        before[name] = (before[name] or 0) + st.count
+        after[name] = (after[name] or 0) + n
+        before_total, after_total = before_total + st.count, after_total + n
+        if n > 0 then st.count = n else st.clear() end
+      end
+    end
+    local rec = storage.wagons[w.unit_number]
+    if rec then
+      for item, old in pairs(before) do
+        local lots = get_lots(rec, item)
+        if lots then
+          local r = after[item] / old
+          local keep = {}
+          for _, lot in ipairs(lots) do
+            lot.amount = lot.amount * r
+            if lot.amount > 0.001 then table.insert(keep, lot) end
+          end
+          rec[item] = #keep > 0 and keep or nil
+        end
+      end
+    end
+  end
+  for _, ct in pairs(storage.contracts or {}) do
+    if C.TOWN_CARGO[ct.item] then
+      ct.amount = math.max(10, math.floor(ct.amount * f / 10) * 10)
+      ct.delivered = math.floor((ct.delivered or 0) * f)
+    end
+  end
+  storage.town_scale = C.TOWN_SCALE
+  log("freight-dispatch: passengers and mail rescaled by " .. f .. " (wagons " .. before_total .. " -> " .. after_total .. ")")
+  game.print("[color=cyan]Passengers and mail now come in believable numbers: a tenth as many, each paying ten times the fare. " ..
+    "Waiting riders, wagons, rockets and contracts were converted. If an interrupt or circuit compares passenger or mail counts, divide its number by " ..
+    C.TOWN_SCALE .. ".[/color]")
+end
+
 script.on_configuration_changed(function()
   if storage.disabled then return end
   init_storage()
   unlock_techs()
   clamp_upgrades()
   if game.surfaces[C.SURFACE] then
+    rescale_town_cargo()
     relayout_towns()
     -- paint any train still in default red (all trains in saves from before 0.3.5)
     for _, t in pairs(game.train_manager.get_trains({ surface = game.surfaces[C.SURFACE] })) do paint_train(t) end
@@ -2933,7 +3044,7 @@ function M.supply_chain()
         service = 0.6 + 0.4 * s.rating })
     elseif kind.main then
       local item = kind.produces[1]
-      local full_rate = C.PROCESS_RATE * s.level * power_mult(s)
+      local full_rate = C.PROCESS_RATE * s.level * power_mult(s) * industry_mult()
       local proc = fl_sum(s, "proc")
       local p = { site = s, rate = fl_rate(s, "mk:" .. item), full = fl_rate(s, "full"), busy = fl_rate(s, "busy"),
         starve = fl_rate(s, "starve"), block = fl_rate(s, "block"), bshort = proc > 0 and fl_sum(s, "bdef") / proc or 0,
@@ -3170,7 +3281,7 @@ remote.add_interface("freight_dispatch", {
       kinds[s.kind] = k
     end
     local uk, basic = urgent_kind(served_ids())
-    return { served = n, room = room_for_site(), kinds = kinds, urgent = uk, basic = basic }
+    return { served = n, room = room_for_site(), kinds = kinds, urgent = uk, basic = basic, found_due = storage.found_due }
   end,
   debug_dump = function()
     local out = {}
