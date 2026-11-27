@@ -3100,6 +3100,12 @@ remote.add_interface("freight_dispatch", {
   queue_ghost = function(g) table.insert(storage.ghost_queue, { ghost = g, tries = 0 }) end,
   buy_upgrade = function(id) M.buy_upgrade(nil, id); return storage.upgrades[id] end,
   site_detail = function(id) return storage.sites[id] and M.site_detail(storage.sites[id]) end,
+  -- where shift+click in the GUI would teleport the character for this site
+  safe_spot = function(id)
+    local s = storage.sites[id]
+    if not s then return nil end
+    return gui.safe_spot(surface(), { s.x, s.y + C.KINDS[s.kind].radius * 0.6 }, 60)
+  end,
   site_status = function(id) return storage.sites[id] and M.site_status(storage.sites[id]) end,
   set_input = function(id, item, amount) storage.sites[id].input[item] = amount end,
   get_input = function(id, item) return storage.sites[id].input[item] end,

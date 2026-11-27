@@ -590,3 +590,37 @@ script.on_nth_tick(353, function()
   SIGSCAN5()
 end)
 
+
+-- 0.9.2 shift+click teleport: old spot vs safe_spot, rails within 3.5 tiles of each
+script.on_nth_tick(359, function()
+  if storage.tp_checked then return end
+  storage.tp_checked = true
+  local surf = game.surfaces["freight"]
+  local tl, set = {}, {}
+  for _, p in pairs(prototypes.entity) do
+    if p.type:find("rail", 1, true) and not p.type:find("signal", 1, true) and p.type ~= "rail-remnants" then set[p.type] = true end
+  end
+  for t in pairs(set) do tl[#tl + 1] = t end
+  local function rails(pos)
+    return surf.count_entities_filtered({ area = { { pos.x - 3.5, pos.y - 3.5 }, { pos.x + 3.5, pos.y + 3.5 } }, type = tl })
+  end
+  local n, bad_old, bad_new, none = 0, 0, 0, 0
+  local prof = helpers.create_profiler()
+  for id, s in pairs(remote.call("freight_dispatch", "sites")) do
+    n = n + 1
+    local target = { s.x, s.y + (s.kind == "town" and 22 or 18) * 0.6 }
+    local old = surf.find_non_colliding_position("character", target, 40, 0.5)
+    local new = remote.call("freight_dispatch", "safe_spot", id)
+    local ro = old and rails(old) or -1
+    local rn = new and rails(new) or -1
+    if ro > 0 then bad_old = bad_old + 1 end
+    if rn > 0 then bad_new = bad_new + 1 end
+    if not new then none = none + 1 end
+    if ro > 0 or rn ~= 0 then
+      log(string.format("FDTP site %d %s: old %.1f,%.1f rails=%d  new %s rails=%d", id, s.name, old and old.x or 0, old and old.y or 0, ro,
+        new and string.format("%.1f,%.1f (%.1f from target)", new.x, new.y, math.sqrt((new.x - target[1])^2 + (new.y - target[2])^2)) or "nil", rn))
+    end
+  end
+  prof.stop()
+  log({ "", "FDTP ", n, " sites, old spot on/near rail: ", bad_old, ", new spot near rail: ", bad_new, ", no spot: ", none, ", time ", prof })
+end)

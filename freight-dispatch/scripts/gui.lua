@@ -588,7 +588,50 @@ script.on_event(defines.events.on_gui_click, function(e)
   end
 end)
 
--- Click: jump the camera there in remote view. Shift+click: teleport the character there.
+-- Every rail entity type the game has (straight, half-diagonal, curved a/b, legacy, ramps...).
+-- The character doesn't collide with rails, so find_non_colliding_position happily picks a track.
+local rail_types
+local function get_rail_types()
+  if rail_types then return rail_types end
+  local set = {}
+  for _, p in pairs(prototypes.entity) do
+    local t = p.type
+    if t:find("rail", 1, true) and not t:find("signal", 1, true) and t ~= "rail-remnants" then
+      set[t] = true
+    end
+  end
+  rail_types = {}
+  for t in pairs(set) do rail_types[#rail_types + 1] = t end
+  return rail_types
+end
+
+local RAIL_CLEARANCE = 3.5 -- tiles from any rail piece (a train is about 2 tiles wide)
+
+-- Nearest spot to `target` where a character fits and no rail is within RAIL_CLEARANCE.
+-- Searches outward in rings of 2 tiles up to `max_r`.
+function G.safe_spot(surf, target, max_r)
+  local types = get_rail_types()
+  local tx, ty = target[1] or target.x, target[2] or target.y
+  local function clear(pos)
+    local c = RAIL_CLEARANCE
+    return surf.count_entities_filtered({
+      area = { { pos.x - c, pos.y - c }, { pos.x + c, pos.y + c } }, type = types, limit = 1,
+    }) == 0
+  end
+  for r = 0, max_r or 60, 2 do
+    local n = r == 0 and 1 or math.ceil(2 * math.pi * r / 2)
+    for i = 0, n - 1 do
+      local a = 2 * math.pi * i / n
+      local cand = { tx + r * math.cos(a), ty + r * math.sin(a) }
+      local pos = surf.find_non_colliding_position("character", cand, 1.5, 0.5)
+      if pos and clear(pos) then return pos end
+    end
+  end
+  return nil
+end
+
+-- Click: jump the camera there in remote view. Shift+click: teleport the character there,
+-- to the nearest spot that is clear of track.
 function G.goto_site(player, site_id, travel)
   local s = storage.sites[site_id]
   if not s then return end
@@ -598,7 +641,7 @@ function G.goto_site(player, site_id, travel)
     if player.gui.screen[n] then player.gui.screen[n].destroy() end
   end
   if travel and player.character then
-    local pos = surf.find_non_colliding_position("character", target, 40, 0.5)
+    local pos = G.safe_spot(surf, target, 60)
     if pos then
       if player.controller_type == defines.controllers.remote then
         pcall(function() player.set_controller({ type = defines.controllers.character, character = player.character }) end)
