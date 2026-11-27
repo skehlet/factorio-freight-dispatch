@@ -56,9 +56,10 @@ data:extend({
   { type = "item-subgroup", name = "fd-dest-mail", group = "freight-dispatch", order = "c" },
 })
 local dest_pictures = {
-  -- 0.10.0: picture up and to the right, number bottom left (the item count is bottom right)
-  ["fd-passengers"] = { icon = "__core__/graphics/icons/entity/character.png", scale = 0.34, shift = { 3, -4 } },
-  ["fd-mail"] = { icon = "__freight-dispatch__/graphics/mail.png", scale = 0.3, shift = { 3, -5 } },
+  -- 0.10.1: number top left, picture down and to the right (Factorio prints the item count
+  -- bottom right; 0.10.0's bottom-left number still met counts like "260")
+  ["fd-passengers"] = { icon = "__core__/graphics/icons/entity/character.png", scale = 0.34, shift = { 3, 2 } },
+  ["fd-mail"] = { icon = "__freight-dispatch__/graphics/mail.png", scale = 0.3, shift = { 3, 3 } },
 }
 for n = 1, C.DESTS do
   local col = C.DEST_COLORS[n]
