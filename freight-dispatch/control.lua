@@ -920,75 +920,105 @@ local function room_for_site()
 end
 M.room_for_site = room_for_site
 
--- The supply chain's next need: a kind with no unserved site to connect. 0.10.4: among those
--- (from every FOUND_TIERS tier), the one with the fewest sites for its KIND_WEIGHTS, so the map
--- keeps the kinds in proportion. Before, the first tier always won: Steve served every new site
--- at once, coal and lumber never had a spare, and his map got 6 coal mines, 6 lumber camps and
--- 1 iron mine. `basic_only` (the spare-site cap is full) limits it to the basic tiers.
--- Returns the kind and whether it's basic.
-local function urgent_kind(served, basic_only)
-  local spare, all = {}, {}
+-- 0.10.5 founding streams (see C.CHAIN_NEED in config). Each returns the kind it wants founded
+-- now, or nil. A stream never founds a kind that already has an unserved site waiting.
+local CHAIN_RAW = { "iron-mine", "coal-mine", "forest" }
+
+local function site_counts(served)
+  local all, spare = {}, {}
   for id, s in pairs(storage.sites) do
     all[s.kind] = (all[s.kind] or 0) + 1
     if not served[id] then spare[s.kind] = true end
   end
-  local best, best_score, best_basic = {}, math.huge, false
-  for _, tier in ipairs(C.FOUND_TIERS) do
-    if tier.basic or not basic_only then
-      for _, kind in ipairs(tier.kinds) do
-        if not spare[kind] and (kind ~= "town" or M.free_dest_no("town")) then
-          local score = ((all[kind] or 0) + 1) / C.KIND_WEIGHTS[kind]
-          if score < best_score - 1e-9 then
-            best, best_score = { { kind, tier.basic or false } }, score
-          elseif score < best_score + 1e-9 then
-            table.insert(best, { kind, tier.basic or false })
-          end
-        end
+  return all, spare
+end
+
+-- chain: the raw input furthest below what the existing consumers need; when all are met, a
+-- steel mill (while mills <= factories) or else a factory
+local function chain_kind(served)
+  local all, spare = site_counts(served)
+  local best, best_short, any_short = {}, 0, false
+  for _, kind in ipairs(CHAIN_RAW) do
+    local need = 0
+    for consumer, per in pairs(C.CHAIN_NEED[kind]) do need = need + per * (all[consumer] or 0) end
+    local have = all[kind] or 0
+    if need > 0 and have < need then
+      any_short = true
+      -- a kind with a spare waiting is skipped: connect that one first
+      if not spare[kind] then
+        local short = (need - have) / need
+        if short > best_short + 1e-9 then best, best_short = { kind }, short
+        elseif short > best_short - 1e-9 then table.insert(best, kind) end
       end
     end
   end
-  if #best == 0 then return nil end
-  local b = pick(best)
-  return b[1], b[2]
+  if #best > 0 then return pick(best) end
+  if any_short then return nil end -- inputs come first: don't grow mills or factories yet
+  local kind = (all["steel-mill"] or 0) <= (all["factory"] or 0) and "steel-mill" or "factory"
+  if spare[kind] then return nil end
+  return kind
+end
+M.chain_kind = function() return chain_kind(served_ids()) end
+
+local function plant_covers(s, plants)
+  for _, p in pairs(plants) do
+    if dist(s.x, s.y, p.x, p.y) <= supply_radius(p) then return true end
+  end
+  return false
 end
 
--- What to found next: a kind missing from the whole map if there is one, otherwise a weighted
--- pick that avoids kinds already waiting unserved (so the spare sites stay varied).
-local function pick_found_kind(served)
-  local all, spare = {}, {}
-  for id, s in pairs(storage.sites) do
-    all[s.kind] = (all[s.kind] or 0) + 1
-    if not served[id] then spare[s.kind] = (spare[s.kind] or 0) + 1 end
+local function power_plants()
+  local plants = {}
+  for _, s in pairs(storage.sites) do
+    if s.kind == "power-plant" then table.insert(plants, s) end
   end
-  local weights, total = {}, 0
-  local missing = false
-  for _, kind in pairs(C.KIND_ORDER) do
-    if not all[kind] then missing = true end
-  end
-  for _, kind in pairs(C.KIND_ORDER) do
-    local w
-    if missing then
-      w = all[kind] and 0 or C.KIND_WEIGHTS[kind]
-    else
-      local n = spare[kind] or 0
-      w = C.KIND_WEIGHTS[kind] / ((1 + n) * (1 + n))
-    end
-    if kind == "town" and not M.free_dest_no("town") then w = 0 end -- 0.9.0: all 16 numbers used
-    weights[kind] = w
-    total = total + w
-  end
-  local r = rand() * total
-  for _, kind in pairs(C.KIND_ORDER) do
-    r = r - weights[kind]
-    if r <= 0 and weights[kind] > 0 then return kind end
-  end
-  return "coal-mine"
+  return plants
 end
+
+-- served sites (not plants or Spaceports) that no plant reaches
+local function uncovered_served(served)
+  local plants, n = power_plants(), 0
+  for id in pairs(served) do
+    local s = storage.sites[id]
+    if s and s.kind ~= "power-plant" and s.kind ~= "spaceport" and not plant_covers(s, plants) then n = n + 1 end
+  end
+  return n
+end
+
+local function power_kind(served)
+  local _, spare = site_counts(served)
+  if spare["power-plant"] then return nil end
+  if uncovered_served(served) < C.POWER_UNCOVERED then return nil end
+  local plants, others = 0, 0
+  for id in pairs(served) do
+    local s = storage.sites[id]
+    if s and s.kind == "power-plant" then plants = plants + 1 elseif s and s.kind ~= "spaceport" then others = others + 1 end
+  end
+  if plants >= math.ceil(others / C.POWER_SITES_PER_PLANT) then return nil end
+  return "power-plant"
+end
+
+local function town_kind(served)
+  local _, spare = site_counts(served)
+  if spare["town"] or not M.free_dest_no("town") then return nil end
+  if not storage.next_town_tick then
+    -- old save: count from its newest town
+    local last = 0
+    for _, s in pairs(storage.sites) do
+      if s.kind == "town" then last = math.max(last, s.created or 0) end
+    end
+    storage.next_town_tick = last + C.TOWN_GAP
+  end
+  if game.tick < storage.next_town_tick then return nil end
+  return "town"
+end
+
+local STREAMS = { { name = "chain", want = chain_kind }, { name = "power", want = power_kind }, { name = "town", want = town_kind } }
 
 -- Found one new site on purpose: FOUND_MIN..FOUND_MAX tiles from a random served site (or
 -- spawn), on generated dry land that keeps the spacing rules. Land that isn't generated yet
 -- is requested and tried again on a later call.
-local function found_site(force_kind)
+local function found_site(kind)
   local surf = surface()
   local served = served_ids()
   local anchors = {}
@@ -998,31 +1028,19 @@ local function found_site(force_kind)
   end
   table.sort(anchors, function(p, q) return p.id < q.id end) -- pairs order isn't stable
   if #anchors == 0 then anchors = { { x = 0, y = 0 } } end
-  -- a supply-chain gap wins over a kind picked earlier that couldn't be placed yet
-  local kind = force_kind or urgent_kind(served, not room_for_site()) or storage.found_kind or pick_found_kind(served)
-  if kind == "town" and not M.free_dest_no("town") then kind = pick_found_kind(served) end
-  if not force_kind then storage.found_kind = kind end
   -- a power plant goes where it would cover the most sites no plant covers yet (fuelled or
-  -- not; your served ones count double), so there's usually a good one to connect. Anything
-  -- else takes the first good spot.
-  local plants = {}
-  for _, s in pairs(storage.sites) do
-    if s.kind == "power-plant" then table.insert(plants, s) end
-  end
-  local function covered(s)
-    for _, p in pairs(plants) do
-      if dist(s.x, s.y, p.x, p.y) <= supply_radius(p) then return true end
-    end
-    return false
-  end
+  -- not; your served ones count double), and only where it reaches C.POWER_MIN_REACH served
+  -- sites no plant covers yet (0.10.5). Anything else takes the first good spot.
+  local plants = power_plants()
   local function score(x, y)
-    local n = 0
+    local n, ns = 0, 0
     for id, s in pairs(storage.sites) do
-      if s.kind ~= "power-plant" and dist(x, y, s.x, s.y) <= C.POWER.radius and not covered(s) then
+      if s.kind ~= "power-plant" and dist(x, y, s.x, s.y) <= C.POWER.radius and not plant_covers(s, plants) then
         n = n + (served[id] and 2 or 1)
+        if served[id] then ns = ns + 1 end
       end
     end
-    return n
+    return n, ns
   end
   local bx, by, bs
   for _ = 1, 40 do
@@ -1034,15 +1052,15 @@ local function found_site(force_kind)
       if not area_generated(surf, x, y) then
         surf.request_to_generate_chunks({ x, y }, 1)
       elseif land_ok(surf, x, y, 13) then
-        local sc = kind == "power-plant" and score(x, y) or 0
-        if not bs or sc > bs then bx, by, bs = x, y, sc end
+        local sc, ns = 0, C.POWER_MIN_REACH
+        if kind == "power-plant" then sc, ns = score(x, y) end
+        if ns >= C.POWER_MIN_REACH and (not bs or sc > bs) then bx, by, bs = x, y, sc end
         if kind ~= "power-plant" then break end
       end
     end
   end
   if not bx then return nil end
   local x, y = bx, by
-  if not force_kind then storage.found_kind = nil end
   local site = create_site(kind, x, y)
   if kind == "spaceport" and not (storage.spaceport_id and storage.sites[storage.spaceport_id]) then storage.spaceport_id = site.id end
   local near, nd = nil, nil
@@ -1080,21 +1098,29 @@ local function maybe_found_site()
     end
     return
   end
-  if game.tick < (storage.next_found_tick or 0) then return end
-  local due = room_for_site()
-  if not due then
-    due = urgent_kind(served_ids(), true) ~= nil -- cap full, but a missing raw material is still founded
+  -- 0.10.5: each stream keeps its own random delay once it wants a site
+  if type(storage.found_due) ~= "table" then storage.found_due = {} end
+  storage.found_kind = nil -- pre-0.10.5 leftover
+  local served = served_ids()
+  local ready = {}
+  for _, st in ipairs(STREAMS) do
+    local kind = st.want(served)
+    if not kind then
+      storage.found_due[st.name] = nil
+    elseif not storage.found_due[st.name] then
+      storage.found_due[st.name] = game.tick + C.FOUND_DELAY_MIN + math.floor(rand() * (C.FOUND_DELAY_MAX - C.FOUND_DELAY_MIN))
+    elseif game.tick >= storage.found_due[st.name] then
+      table.insert(ready, { name = st.name, kind = kind })
+    end
   end
-  if not due then storage.found_due = nil return end
-  -- 0.9.6: wait a random while once a founding is due, so it doesn't follow a new stop at once
-  if not storage.found_due then
-    storage.found_due = game.tick + C.FOUND_DELAY_MIN + math.floor(rand() * (C.FOUND_DELAY_MAX - C.FOUND_DELAY_MIN))
-    return
-  end
-  if game.tick < storage.found_due then return end
-  if found_site() then
-    storage.found_due = nil
-    storage.next_found_tick = game.tick + C.FOUND_GAP
+  if game.tick < (storage.next_found_tick or 0) or #ready == 0 then return end
+  for _, r in ipairs(ready) do -- one per call; a stream that can't place yet doesn't block the others
+    if found_site(r.kind) then
+      storage.found_due[r.name] = nil
+      storage.next_found_tick = game.tick + C.FOUND_GAP
+      if r.kind == "town" then storage.next_town_tick = game.tick + C.TOWN_GAP end
+      return
+    end
   end
 end
 
@@ -3006,15 +3032,6 @@ local function nearest_spare(kind, to, served)
   return best, bd
 end
 
-local function basic_kind(kind)
-  for _, tier in ipairs(C.FOUND_TIERS) do
-    for _, k in ipairs(tier.kinds) do
-      if k == kind then return tier.basic or false end
-    end
-  end
-  return false
-end
-
 local function kind_label(kind) return C.KINDS[kind].label:lower() end
 local function item_label(item) return icon(item) .. " " .. C.CARGO[item].label:lower() end
 local function pct(f) return math.floor(f * 100 + 0.5) .. "%" end
@@ -3217,7 +3234,7 @@ function M.supply_chain()
       if sp then
         nxt.text = head .. " Connect " .. site_title(sp) .. " (" .. fmt(d) .. " tiles from " .. r.who.name .. ")."
         add_site(sp)
-      elseif basic_kind(pk) then
+      elseif chain_kind(served) == pk then
         nxt.text = head .. " No spare " .. kind_label(pk) .. " yet: a new one will be founded near your network soon."
       else
         nxt.text = head .. " No spare " .. kind_label(pk) .. " yet: one may be founded later."
@@ -3294,8 +3311,9 @@ remote.add_interface("freight_dispatch", {
       if served_ids()[id] then k.served = k.served + 1 else k.spare = k.spare + 1 end
       kinds[s.kind] = k
     end
-    local uk, basic = urgent_kind(served_ids())
-    return { served = n, room = room_for_site(), kinds = kinds, urgent = uk, basic = basic, found_due = storage.found_due }
+    local sv = served_ids()
+    return { served = n, room = room_for_site(), kinds = kinds, chain = chain_kind(sv), power = power_kind(sv),
+      town = town_kind(sv), uncovered = uncovered_served(sv), found_due = storage.found_due, next_town_tick = storage.next_town_tick }
   end,
   debug_dump = function()
     local out = {}

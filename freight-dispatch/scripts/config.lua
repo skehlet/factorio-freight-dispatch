@@ -15,33 +15,41 @@ C.INPUT_CAP = 20000
 -- 0.7.2 (Steve: "increase some more"): everything spread x1.4 (was 180 / 300).
 C.SITE_MIN_DIST = 250      -- any two sites
 C.TOWN_MIN_DIST = 420      -- any two towns
--- Founding (0.4.0): new sites are no longer rolled per generated chunk. Whenever unserved
--- sites (no train stop in their ring) number fewer than max(SPARE_SITES_MIN, served x
--- SPARE_SITES_RATIO), one new site is founded on purpose: a kind the map is short of,
--- FOUND_MIN..FOUND_MAX tiles from one of your served sites, at most once per FOUND_GAP.
+-- Founding (0.4.0): new sites are founded on purpose (not rolled per chunk), FOUND_MIN..FOUND_MAX
+-- tiles from one of your served sites, at most one per FOUND_GAP.
+-- 0.10.5 (Steve): three independent streams, each founding at most one unserved site of a kind
+-- at a time (it waits until you connect it), so the map never fills with clutter:
+--   chain: coal, lumber, iron, steel mill, factory, bottom up (CHAIN_NEED below)
+--   power: a power plant once POWER_UNCOVERED of your served sites are outside every plant
+--   towns: one every TOWN_GAP, while town numbers are free
+-- Before 0.10.5 one pool walked fixed tiers and always took the first kind with no spare;
+-- Steve connects every site at once, so his map got 6 coal mines, 6 lumber camps, 1 iron mine
+-- and 3 towns. SPARE_SITES_* (the old clutter cap) now only feeds the `served` remote.
 C.SPARE_SITES_MIN = 6
 C.SPARE_SITES_RATIO = 0.5
 C.FOUND_MIN = 280          -- 0.7.2: was 200
 C.FOUND_MAX = 700          -- 0.7.2: was 500
 C.FOUND_GAP = 30 * 60
--- 0.9.6 (Steve): a founding waits a random 3 to 10 minutes after it becomes due (e.g. after
--- your first stop at a site opens room under the cap), so a new stop isn't instantly followed
--- by a "new site founded" alert. The first Spaceport and bought ones are not delayed.
--- 0.10.3 (Steve: overtuned): 1 to 4 minutes. His "2026-11-27a 01" save (85 min) had every
--- site served and none spare, founding one per 7 to 9.5 min, so he was waiting on new sites.
-C.FOUND_DELAY_MIN = 1 * 3600
-C.FOUND_DELAY_MAX = 4 * 3600  -- about one site per 3 min at most while there's room
--- Supply-chain order for founding (0.4.6, Steve asked: he had spare iron, steel and factories
--- but no lumber camp to connect). A kind with no unserved site gets founded next; since 0.10.4
--- the one with the fewest sites for its KIND_WEIGHTS (before, the first such tier always won). Tiers marked `basic` are founded even when the spare-site cap is full, so
--- the raw materials are always on offer. Once every tier has a spare, the weighted pick runs.
-C.FOUND_TIERS = {
-  { kinds = { "coal-mine", "forest" }, basic = true },
-  { kinds = { "iron-mine", "power-plant" }, basic = true },
-  { kinds = { "town" }, basic = true }, -- 0.4.7: always one town to connect (Steve: towns felt scarce)
-  { kinds = { "steel-mill" } },
-  { kinds = { "factory" } },
+-- 0.9.6 (Steve): each founding waits a random FOUND_DELAY_MIN..MAX after it becomes due, so a
+-- new stop isn't instantly followed by a "new site founded" alert. Spaceports are not delayed.
+-- 0.9.6 had 3 to 10 min, 0.10.3 1 to 4, 0.10.5 2 to 6 (Steve: "somewhere in between").
+C.FOUND_DELAY_MIN = 2 * 3600
+C.FOUND_DELAY_MAX = 6 * 3600
+-- Chain sites per consumer, from what each uses at equal levels: a steel mill eats 50 ore/s per
+-- level (an iron mine makes ~12, 3 keeps the count down) and 25 coal for its booster (a mine
+-- makes ~12); a factory eats one mill's steel and 25 lumber (a camp makes ~10); a power plant
+-- burns 15/s of coal or lumber (half a coal mine counted per plant). Inputs for the existing consumers come first; when all are
+-- met the chain grows a steel mill (while mills <= factories) or else a factory.
+C.CHAIN_NEED = {
+  ["iron-mine"] = { ["steel-mill"] = 3 },
+  ["coal-mine"] = { ["steel-mill"] = 2, ["power-plant"] = 0.5 },
+  ["forest"] = { ["factory"] = 2 },
 }
+C.POWER_UNCOVERED = 3      -- served sites outside every plant's reach before a new plant is founded
+C.POWER_SITES_PER_PLANT = 5 -- and at most one plant per this many served sites (Steve's map is wide:
+                            -- without it a save copy grew 14 plants in an hour)
+C.POWER_MIN_REACH = 2       -- a new plant must reach this many served sites no plant covers yet
+C.TOWN_GAP = 22 * 3600     -- after a town is founded, before the next becomes due (plus the delay: ~26 min)
 C.STUCK_TICKS = 3 * 60 * 60
 -- Supply chain window (0.5.0): rates are averages over the last FLOW_MINUTES minutes. A consumer
 -- counts as short when it spends more than CHAIN_SHORT of its time short of an input.
@@ -249,8 +257,8 @@ C.KINDS = {
     label = "Power Plant", icon = "fd-coal", radius = 18, color = { 1, 0.6, 1 },
     produces = {}, accepts = { "fd-coal", "fd-wood" },
   },
-  -- 0.7.0 end game: founded once at Railway Tycoon (C.PAD_RANK). Not in KIND_ORDER, KIND_WEIGHTS or
-  -- FOUND_TIERS, so normal founding never picks it.
+  -- 0.7.0 end game: founded once at Railway Tycoon (C.PAD_RANK). Not in KIND_ORDER or any
+  -- founding stream, so normal founding never picks it.
   ["spaceport"] = {
     label = "Spaceport", icon = "rocket-silo", radius = 22, color = { 0.6, 0.9, 1 },
     produces = {}, accepts = { "fd-passengers", "fd-mail", "fd-goods" },
@@ -293,10 +301,6 @@ C.SPACEPORT = {
 }
 
 C.KIND_ORDER = { "town", "coal-mine", "iron-mine", "forest", "steel-mill", "factory", "power-plant" }
-C.KIND_WEIGHTS = {
-  ["town"] = 18, ["coal-mine"] = 14, ["iron-mine"] = 14, ["forest"] = 11,
-  ["steel-mill"] = 10, ["factory"] = 10, ["power-plant"] = 9,
-}
 
 -- Power plants (0.4.1): burn delivered fuel and power every other site within their supply
 -- radius while the fuel pile isn't empty. A site takes the bonus from one plant at most.
