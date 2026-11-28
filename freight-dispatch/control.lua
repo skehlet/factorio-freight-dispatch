@@ -920,21 +920,36 @@ local function room_for_site()
 end
 M.room_for_site = room_for_site
 
--- The supply chain's next need: the lowest FOUND_TIERS tier with a kind that has no unserved
--- site to connect. Returns that kind (random among the tier's gaps) and whether it's basic.
-local function urgent_kind(served)
-  local spare = {}
+-- The supply chain's next need: a kind with no unserved site to connect. 0.10.4: among those
+-- (from every FOUND_TIERS tier), the one with the fewest sites for its KIND_WEIGHTS, so the map
+-- keeps the kinds in proportion. Before, the first tier always won: Steve served every new site
+-- at once, coal and lumber never had a spare, and his map got 6 coal mines, 6 lumber camps and
+-- 1 iron mine. `basic_only` (the spare-site cap is full) limits it to the basic tiers.
+-- Returns the kind and whether it's basic.
+local function urgent_kind(served, basic_only)
+  local spare, all = {}, {}
   for id, s in pairs(storage.sites) do
+    all[s.kind] = (all[s.kind] or 0) + 1
     if not served[id] then spare[s.kind] = true end
   end
+  local best, best_score, best_basic = {}, math.huge, false
   for _, tier in ipairs(C.FOUND_TIERS) do
-    local gaps = {}
-    for _, kind in ipairs(tier.kinds) do
-      if not spare[kind] and (kind ~= "town" or M.free_dest_no("town")) then table.insert(gaps, kind) end
+    if tier.basic or not basic_only then
+      for _, kind in ipairs(tier.kinds) do
+        if not spare[kind] and (kind ~= "town" or M.free_dest_no("town")) then
+          local score = ((all[kind] or 0) + 1) / C.KIND_WEIGHTS[kind]
+          if score < best_score - 1e-9 then
+            best, best_score = { { kind, tier.basic or false } }, score
+          elseif score < best_score + 1e-9 then
+            table.insert(best, { kind, tier.basic or false })
+          end
+        end
+      end
     end
-    if #gaps > 0 then return pick(gaps), tier.basic or false end
   end
-  return nil
+  if #best == 0 then return nil end
+  local b = pick(best)
+  return b[1], b[2]
 end
 
 -- What to found next: a kind missing from the whole map if there is one, otherwise a weighted
@@ -984,7 +999,7 @@ local function found_site(force_kind)
   table.sort(anchors, function(p, q) return p.id < q.id end) -- pairs order isn't stable
   if #anchors == 0 then anchors = { { x = 0, y = 0 } } end
   -- a supply-chain gap wins over a kind picked earlier that couldn't be placed yet
-  local kind = force_kind or urgent_kind(served) or storage.found_kind or pick_found_kind(served)
+  local kind = force_kind or urgent_kind(served, not room_for_site()) or storage.found_kind or pick_found_kind(served)
   if kind == "town" and not M.free_dest_no("town") then kind = pick_found_kind(served) end
   if not force_kind then storage.found_kind = kind end
   -- a power plant goes where it would cover the most sites no plant covers yet (fuelled or
@@ -1068,8 +1083,7 @@ local function maybe_found_site()
   if game.tick < (storage.next_found_tick or 0) then return end
   local due = room_for_site()
   if not due then
-    local _, basic = urgent_kind(served_ids())
-    due = basic -- cap full, but a missing raw material is still founded
+    due = urgent_kind(served_ids(), true) ~= nil -- cap full, but a missing raw material is still founded
   end
   if not due then storage.found_due = nil return end
   -- 0.9.6: wait a random while once a founding is due, so it doesn't follow a new stop at once

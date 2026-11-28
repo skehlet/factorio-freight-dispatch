@@ -32,8 +32,8 @@ C.FOUND_GAP = 30 * 60
 C.FOUND_DELAY_MIN = 1 * 3600
 C.FOUND_DELAY_MAX = 4 * 3600  -- about one site per 3 min at most while there's room
 -- Supply-chain order for founding (0.4.6, Steve asked: he had spare iron, steel and factories
--- but no lumber camp to connect). The first tier with a kind that has no unserved site gets
--- that kind next. Tiers marked `basic` are founded even when the spare-site cap is full, so
+-- but no lumber camp to connect). A kind with no unserved site gets founded next; since 0.10.4
+-- the one with the fewest sites for its KIND_WEIGHTS (before, the first such tier always won). Tiers marked `basic` are founded even when the spare-site cap is full, so
 -- the raw materials are always on offer. Once every tier has a spare, the weighted pick runs.
 C.FOUND_TIERS = {
   { kinds = { "coal-mine", "forest" }, basic = true },
