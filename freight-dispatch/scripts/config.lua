@@ -27,8 +27,10 @@ C.FOUND_GAP = 30 * 60
 -- 0.9.6 (Steve): a founding waits a random 3 to 10 minutes after it becomes due (e.g. after
 -- your first stop at a site opens room under the cap), so a new stop isn't instantly followed
 -- by a "new site founded" alert. The first Spaceport and bought ones are not delayed.
-C.FOUND_DELAY_MIN = 3 * 3600
-C.FOUND_DELAY_MAX = 10 * 3600  -- about one site per 6.5 min at most while there's room (his 0.9.5 game founded one per ~5 min)
+-- 0.10.3 (Steve: overtuned): 1 to 4 minutes. His "2026-11-27a 01" save (85 min) had every
+-- site served and none spare, founding one per 7 to 9.5 min, so he was waiting on new sites.
+C.FOUND_DELAY_MIN = 1 * 3600
+C.FOUND_DELAY_MAX = 4 * 3600  -- about one site per 3 min at most while there's room
 -- Supply-chain order for founding (0.4.6, Steve asked: he had spare iron, steel and factories
 -- but no lumber camp to connect). The first tier with a kind that has no unserved site gets
 -- that kind next. Tiers marked `basic` are founded even when the spare-site cap is full, so
