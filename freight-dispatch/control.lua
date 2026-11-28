@@ -998,6 +998,10 @@ local function power_kind(served)
   return "power-plant"
 end
 
+local function town_gap()
+  return C.TOWN_GAP_MIN + math.floor(rand() * (C.TOWN_GAP_MAX - C.TOWN_GAP_MIN))
+end
+
 local function town_kind(served)
   local _, spare = site_counts(served)
   if spare["town"] or not M.free_dest_no("town") then return nil end
@@ -1007,13 +1011,14 @@ local function town_kind(served)
     for _, s in pairs(storage.sites) do
       if s.kind == "town" then last = math.max(last, s.created or 0) end
     end
-    storage.next_town_tick = last + C.TOWN_GAP
+    storage.next_town_tick = last + town_gap()
   end
   if game.tick < storage.next_town_tick then return nil end
   return "town"
 end
 
-local STREAMS = { { name = "chain", want = chain_kind }, { name = "power", want = power_kind }, { name = "town", want = town_kind } }
+local STREAMS = { { name = "chain", want = chain_kind }, { name = "power", want = power_kind },
+  { name = "town", want = town_kind, no_delay = true } } -- towns: the random gap is the whole wait
 
 -- Found one new site on purpose: FOUND_MIN..FOUND_MAX tiles from a random served site (or
 -- spawn), on generated dry land that keeps the spacing rules. Land that isn't generated yet
@@ -1108,7 +1113,8 @@ local function maybe_found_site()
     if not kind then
       storage.found_due[st.name] = nil
     elseif not storage.found_due[st.name] then
-      storage.found_due[st.name] = game.tick + C.FOUND_DELAY_MIN + math.floor(rand() * (C.FOUND_DELAY_MAX - C.FOUND_DELAY_MIN))
+      storage.found_due[st.name] = st.no_delay and game.tick or
+        (game.tick + C.FOUND_DELAY_MIN + math.floor(rand() * (C.FOUND_DELAY_MAX - C.FOUND_DELAY_MIN)))
     elseif game.tick >= storage.found_due[st.name] then
       table.insert(ready, { name = st.name, kind = kind })
     end
@@ -1118,7 +1124,7 @@ local function maybe_found_site()
     if found_site(r.kind) then
       storage.found_due[r.name] = nil
       storage.next_found_tick = game.tick + C.FOUND_GAP
-      if r.kind == "town" then storage.next_town_tick = game.tick + C.TOWN_GAP end
+      if r.kind == "town" then storage.next_town_tick = game.tick + town_gap() end
       return
     end
   end

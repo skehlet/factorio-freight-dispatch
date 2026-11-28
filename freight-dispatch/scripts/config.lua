@@ -49,7 +49,10 @@ C.POWER_UNCOVERED = 3      -- served sites outside every plant's reach before a 
 C.POWER_SITES_PER_PLANT = 5 -- and at most one plant per this many served sites (Steve's map is wide:
                             -- without it a save copy grew 14 plants in an hour)
 C.POWER_MIN_REACH = 2       -- a new plant must reach this many served sites no plant covers yet
-C.TOWN_GAP = 22 * 3600     -- after a town is founded, before the next becomes due (plus the delay: ~26 min)
+-- after a town is founded, the next comes a random TOWN_GAP_MIN..MAX later (0.10.6, Steve; 0.10.5
+-- had 22 min plus the 2 to 6 min delay). The town stream skips FOUND_DELAY: this is its whole wait.
+C.TOWN_GAP_MIN = 5 * 3600
+C.TOWN_GAP_MAX = 15 * 3600
 C.STUCK_TICKS = 3 * 60 * 60
 -- Supply chain window (0.5.0): rates are averages over the last FLOW_MINUTES minutes. A consumer
 -- counts as short when it spends more than CHAIN_SHORT of its time short of an input.
