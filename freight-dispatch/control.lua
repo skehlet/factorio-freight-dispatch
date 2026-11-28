@@ -1120,10 +1120,16 @@ local function maybe_found_site()
     end
   end
   if game.tick < (storage.next_found_tick or 0) or #ready == 0 then return end
+  -- 0.10.7: a due town goes first (keeps them TOWN_GAP_MIN..MAX apart), then whichever stream
+  -- has waited longest
+  table.sort(ready, function(a, b)
+    if (a.name == "town") ~= (b.name == "town") then return a.name == "town" end
+    return storage.found_due[a.name] < storage.found_due[b.name]
+  end)
   for _, r in ipairs(ready) do -- one per call; a stream that can't place yet doesn't block the others
     if found_site(r.kind) then
       storage.found_due[r.name] = nil
-      storage.next_found_tick = game.tick + C.FOUND_GAP
+      storage.next_found_tick = game.tick + C.FOUND_GAP_MIN + math.floor(rand() * (C.FOUND_GAP_MAX - C.FOUND_GAP_MIN))
       if r.kind == "town" then storage.next_town_tick = game.tick + town_gap() end
       return
     end

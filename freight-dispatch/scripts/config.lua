@@ -16,12 +16,12 @@ C.INPUT_CAP = 20000
 C.SITE_MIN_DIST = 250      -- any two sites
 C.TOWN_MIN_DIST = 420      -- any two towns
 -- Founding (0.4.0): new sites are founded on purpose (not rolled per chunk), FOUND_MIN..FOUND_MAX
--- tiles from one of your served sites, at most one per FOUND_GAP.
+-- tiles from one of your served sites.
 -- 0.10.5 (Steve): three independent streams, each founding at most one unserved site of a kind
 -- at a time (it waits until you connect it), so the map never fills with clutter:
 --   chain: coal, lumber, iron, steel mill, factory, bottom up (CHAIN_NEED below)
 --   power: a power plant once POWER_UNCOVERED of your served sites are outside every plant
---   towns: one every TOWN_GAP, while town numbers are free
+--   towns: one every TOWN_GAP_MIN..MAX, while town numbers are free
 -- Before 0.10.5 one pool walked fixed tiers and always took the first kind with no spare;
 -- Steve connects every site at once, so his map got 6 coal mines, 6 lumber camps, 1 iron mine
 -- and 3 towns. SPARE_SITES_* (the old clutter cap) now only feeds the `served` remote.
@@ -29,7 +29,10 @@ C.SPARE_SITES_MIN = 6
 C.SPARE_SITES_RATIO = 0.5
 C.FOUND_MIN = 280          -- 0.7.2: was 200
 C.FOUND_MAX = 700          -- 0.7.2: was 500
-C.FOUND_GAP = 30 * 60
+-- 0.10.7 (Steve: a steel mill, iron mine and power plant came within minutes): after any
+-- founding, none from any stream for a random FOUND_GAP_MIN..MAX (was a fixed 30 s)
+C.FOUND_GAP_MIN = 4 * 3600
+C.FOUND_GAP_MAX = 7 * 3600
 -- 0.9.6 (Steve): each founding waits a random FOUND_DELAY_MIN..MAX after it becomes due, so a
 -- new stop isn't instantly followed by a "new site founded" alert. Spaceports are not delayed.
 -- 0.9.6 had 3 to 10 min, 0.10.3 1 to 4, 0.10.5 2 to 6 (Steve: "somewhere in between").
@@ -51,8 +54,8 @@ C.POWER_SITES_PER_PLANT = 5 -- and at most one plant per this many served sites 
 C.POWER_MIN_REACH = 2       -- a new plant must reach this many served sites no plant covers yet
 -- after a town is founded, the next comes a random TOWN_GAP_MIN..MAX later (0.10.6, Steve; 0.10.5
 -- had 22 min plus the 2 to 6 min delay). The town stream skips FOUND_DELAY: this is its whole wait.
-C.TOWN_GAP_MIN = 5 * 3600
-C.TOWN_GAP_MAX = 15 * 3600
+C.TOWN_GAP_MIN = 10 * 3600 -- 0.10.7: 10 to 20 (0.10.6 had 5 to 15)
+C.TOWN_GAP_MAX = 20 * 3600
 C.STUCK_TICKS = 3 * 60 * 60
 -- Supply chain window (0.5.0): rates are averages over the last FLOW_MINUTES minutes. A consumer
 -- counts as short when it spends more than CHAIN_SHORT of its time short of an input.
